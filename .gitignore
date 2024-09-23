@@ -1,0 +1,57 @@
+# Ignore Python bytecode files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Ignore Virtual Environment folder
+.venv/
+
+# Ignore VSCode settings folder
+.vscode/
+
+# Ignore data folder
+data/
+
+# Ignore macOS system files
+.DS_Store
+
+# Ignore log files
+*.log
+
+# Ignore Python packaging files
+build/
+dist/
+*.egg-info/
+
+# Ignore pipenv and poetry virtual environment files
+Pipfile.lock
+poetry.lock
+
+# Ignore mypy type checking reports
+.mypy_cache/
+
+# Ignore pytest cache
+.pytest_cache/
+
+# Ignore Jupyter Notebook checkpoints
+.ipynb_checkpoints/
+
+# Ignore coverage reports
+htmlcov/
+.coverage
+coverage.xml
+*.cover
+*.py,cover
+
+# Ignore PyInstaller bundled files
+*.spec
+
+# Ignore SQLite database files
+*.sqlite3
+
+# Ignore environment variable files
+.env
+.env.*
+
+# Ignore wheel and distribution files
+*.whl
