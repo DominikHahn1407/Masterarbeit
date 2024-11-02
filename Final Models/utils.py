@@ -8,7 +8,7 @@ import random
 from PIL import Image
 from torch.utils.data import Dataset, DataLoader
 
-class DICOMDataset(Dataset):
+class DICOMCoarseDataset(Dataset):
     def __init__(self, root_dir, num_images_per_class, classes, transform=None):
         self.root_dir = root_dir
         self.num_images_per_class = num_images_per_class
@@ -42,7 +42,7 @@ class DICOMDataset(Dataset):
     
     def visualize_images(self, num_images=5):
         num_images = min(num_images, len(self.image_paths))
-        fig, axes = plt.subplots(1, num_images, figsize=(15,15))
+        _, axes = plt.subplots(1, num_images, figsize=(15,15))
         if num_images == 1:
             axes = [axes]
         for i in range(num_images):
