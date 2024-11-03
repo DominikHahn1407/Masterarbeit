@@ -1,4 +1,5 @@
 import math
+import matplotlib.pyplot as plt
 import numpy as np
 import torch
 import torch.nn as nn
@@ -23,6 +24,7 @@ class CapsuleNetwork(nn.Module):
             hidden_dim=512, 
             train_on_gpu=True):
         super(CapsuleNetwork, self).__init__()
+        self.image_size = image_size
         self.num_classes = num_classes
         self.train_on_gpu = train_on_gpu
         self.conv_layer = ConvLayer(in_channels_conv, out_channels_conv, kernel_size_conv, stride_conv, padding_conv)        
@@ -57,6 +59,8 @@ class CapsuleNetwork(nn.Module):
         losses = []
         for epoch in range(1, n_epochs+1):
             train_loss = 0.0
+            correct_predictions = 0
+            total_samples = 0
             self.train()
             for batch_i, (images, target) in enumerate(train_loader):
                 target = torch.eye(self.num_classes).index_select(dim=0, index=target)
@@ -68,12 +72,19 @@ class CapsuleNetwork(nn.Module):
                 loss.backward()
                 optimizer.step()
                 train_loss += loss.item()
+                
+                preds = torch.sum(caps_output, dim=2)
+                correct_predictions += (torch.max(preds, dim=1).indices == torch.max(target, dim=1).indices).sum().item()
+                total_samples += target.size(0)
 
                 if batch_i != 0 and batch_i % print_every == 0:
                     avg_train_loss = train_loss/print_every
                     losses.append(avg_train_loss)
-                    print('Epoch: {} \tTraining Loss: {:.8f}'.format(epoch, avg_train_loss))
+                    accuracy = correct_predictions / total_samples * 100
+                    print('Epoch: {} \tTraining Loss: {:.8f} \tAccuracy: {:.2f}%'.format(epoch, avg_train_loss, accuracy))
                     train_loss = 0 # reset accumulated training loss
+                    correct_predictions = 0
+                    total_samples = 0
         return losses
     
     def test_model(self, criterion, test_loader):
@@ -296,3 +307,15 @@ def dynamic_routing(b_ij, u_hat, squash, routing_iterations=3):
             # add the calculated value to the initially set 0 b_ij
             b_ij = b_ij + a_ij
     return v_j
+
+def display_images(images, reconstructions):
+    image_size = images.shape[2]
+    images = images.data.cpu().numpy()
+    reconstructions = reconstructions.view(-1, 1, image_size, image_size)
+    reconstructions = reconstructions.data.cpu().numpy()
+    _, axs = plt.subplots(nrows=2, ncols=10, sharex=True, sharey=True, figsize=(26,5))
+    for images, row in zip([images, reconstructions], axs):
+        for img, ax in zip(images, row):
+            ax.imshow(np.squeeze(img), cmap="gray")
+            ax.get_xaxis().set_visible(False)
+            ax.get_yaxis().set_visible(False)

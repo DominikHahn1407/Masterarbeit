@@ -6,7 +6,8 @@ import torch
 import random
 
 from PIL import Image
-from torch.utils.data import Dataset, DataLoader
+from collections import Counter
+from torch.utils.data import Dataset
 
 class DICOMCoarseDataset(Dataset):
     def __init__(self, root_dir, num_images_per_class, classes, transform=None):
@@ -39,6 +40,19 @@ class DICOMCoarseDataset(Dataset):
             image = self.transform(image)
         label = self.labels[index]
         return image, label
+    
+    def get_labels(self):
+        return self.labels
+    
+    def display_label_distribution(self):
+        label_counts = Counter(self.labels)
+        labels, counts = zip(*label_counts.items())
+        plt.bar(labels, counts)
+        plt.xlabel("Label")
+        plt.ylabel("Count")
+        plt.title("Label Distribution")
+        plt.xticks(labels, [self.classes[label] for label in labels])
+        plt.show()
     
     def visualize_images(self, num_images=5):
         num_images = min(num_images, len(self.image_paths))
