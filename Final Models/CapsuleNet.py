@@ -1,9 +1,12 @@
+import itertools
 import math
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+
+from sklearn.metrics import confusion_matrix
 
 class CapsuleNetwork(nn.Module):
     def __init__(
@@ -59,8 +62,6 @@ class CapsuleNetwork(nn.Module):
         losses = []
         for epoch in range(1, n_epochs+1):
             train_loss = 0.0
-            correct_predictions = 0
-            total_samples = 0
             self.train()
             for batch_i, (images, target) in enumerate(train_loader):
                 target = torch.eye(self.num_classes).index_select(dim=0, index=target)
@@ -72,24 +73,37 @@ class CapsuleNetwork(nn.Module):
                 loss.backward()
                 optimizer.step()
                 train_loss += loss.item()
-                
-                preds = torch.sum(caps_output, dim=2)
-                correct_predictions += (torch.max(preds, dim=1).indices == torch.max(target, dim=1).indices).sum().item()
-                total_samples += target.size(0)
 
                 if batch_i != 0 and batch_i % print_every == 0:
                     avg_train_loss = train_loss/print_every
                     losses.append(avg_train_loss)
-                    accuracy = correct_predictions / total_samples * 100
-                    print('Epoch: {} \tTraining Loss: {:.8f} \tAccuracy: {:.2f}%'.format(epoch, avg_train_loss, accuracy))
+                    print('Epoch: {} \tTraining Loss: {:.8f}'.format(epoch, avg_train_loss))
                     train_loss = 0 # reset accumulated training loss
-                    correct_predictions = 0
-                    total_samples = 0
         return losses
+    
+    def display_confusion_matrix(self, true_labels, pred_labels):
+        cm = confusion_matrix(true_labels, pred_labels)
+        plt.figure(figsize=(8,6))
+        plt.imshow(cm, interpolation="nearest", cmap=plt.cm.Reds)
+        plt.title("Confusion Matrix")
+        plt.colorbar()
+        tick_marks = np.arange(self.num_classes)
+        plt.xticks(tick_marks, range(self.num_classes))
+        plt.yticks(tick_marks, range(self.num_classes))
+
+        threshold = cm.max()/2
+        for i, j in itertools.product(range(cm.shape[0]), range(cm.shape[1])):
+            plt.text(j, i, f"{cm[i,j]}", horizontalalignment="center", color="white" if cm[i,j] > threshold else "black")
+        plt.ylabel("True Label")
+        plt.xlabel("Predicted Label")
+        plt.tight_layout()
+        plt.show()
     
     def test_model(self, criterion, test_loader):
         class_correct = list(0. for i in range(self.num_classes))
         class_total = list(0. for i in range(self.num_classes))
+        true_labels = []
+        pred_labels = []
         test_loss = 0
         self.eval()
 
@@ -104,6 +118,8 @@ class CapsuleNetwork(nn.Module):
             _, pred = torch.max(y.data.cpu(), 1)
             _, target_shape = torch.max(target.data.cpu(), 1)
             correct = np.squeeze(pred.eq(target_shape.data.view_as(pred)))
+            true_labels.extend(target_shape.tolist())
+            pred_labels.extend(pred.tolist())
 
             for i in range(batch_size):
                 label = target_shape.data[i]
@@ -122,7 +138,7 @@ class CapsuleNetwork(nn.Module):
         print('\nTest Accuracy (Overall): %2d%% (%2d/%2d)' % (
             100. * np.sum(class_correct) / np.sum(class_total),
             np.sum(class_correct), np.sum(class_total)))
-        
+        self.display_confusion_matrix(torch.tensor(true_labels), torch.tensor(pred_labels))
         # return last batch of capsule vectors, images, reconstructions
         return caps_output, images, reconstructions
 
