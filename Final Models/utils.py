@@ -72,6 +72,64 @@ class DICOMCoarseDataset(Dataset):
             axes[i].axis("off")
         plt.show()
 
+class DICOMFineDataset(Dataset):
+    def __init__(self, root_dir, classes, transform=None):
+        random.seed(41)
+        self.root_dir = root_dir
+        self.classes = classes
+        self.transform = transform
+        self.image_paths = []
+        self.labels = []
+
+        for file_name in os.listdir(root_dir):
+            if file_name.endswith(".dcm"):
+                prefix = file_name[0]
+                if prefix in self.classes:
+                    self.image_paths.append(os.path.join(root_dir, file_name))
+                    self.labels.append(self.classes[prefix])
+
+    def __len__(self):
+        return len(self.image_paths)
+    
+    def __getitem__(self, index):
+        img_path = self.image_paths[index]
+        dicom_image = pydicom.dcmread(img_path)
+        image = dicom_image.pixel_array
+        image = Image.fromarray(np.uint8(image))
+        if self.transform:
+            image = self.transform(image)
+        label = self.labels[index]
+        return image, label
+    
+    def get_labels(self):
+        return self.labels
+    
+    def display_label_distribution(self):
+        label_counts = Counter(self.labels)
+        labels, counts = zip(*label_counts.items())
+        plt.bar(labels, counts)
+        plt.xlabel("Label")
+        plt.ylabel("Count")
+        plt.title("Label Distribution")
+        plt.xticks(labels, [list(self.classes.keys())[label] for label in labels])
+        plt.show()
+
+    def visualize_images(self, num_images=5):
+        num_images = min(num_images, len(self.image_paths))
+        _, axes = plt.subplots(1, num_images, figsize=(15, 15))
+        if num_images == 1:
+            axes = [axes]
+        for i in range(num_images):
+            random_index = random.randint(0, len(self.image_paths) - 1)
+            image, label = self.__getitem__(random_index)
+            if isinstance(image, torch.Tensor):
+                image = image.squeeze().numpy()
+            axes[i].imshow(image, cmap="gray")
+            axes[i].set_title(f"Label: {list(self.classes.keys())[label]}")
+            axes[i].axis("off")
+        plt.show()
+
+
 def display_data_loader_batch(data_loader, classes):
     data_iter = iter(data_loader)
     images, labels = next(data_iter)
