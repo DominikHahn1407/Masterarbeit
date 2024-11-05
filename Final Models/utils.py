@@ -10,7 +10,7 @@ from collections import Counter
 from torch.utils.data import Dataset
 
 class DICOMCoarseDataset(Dataset):
-    def __init__(self, root_dir, num_images_per_class, classes, transform=None):
+    def __init__(self, root_dir, num_images_per_class, classes, transform=None, scenario=1):
         random.seed(41)
         self.root_dir = root_dir
         self.num_images_per_class = num_images_per_class
@@ -23,6 +23,12 @@ class DICOMCoarseDataset(Dataset):
             class_folder = os.path.join(root_dir, class_name)
             if os.path.isdir(class_folder):
                 dicom_files = [f for f in os.listdir(class_folder) if f.endswith('.dcm')]
+
+                if class_name == "non-nodule":
+                    if scenario == 2:
+                        dicom_files = [f for f in dicom_files if f.startswith('N')]
+                    elif scenario == 3:
+                        dicom_files = [f for f in dicom_files if not f.startswith('N')]
                 if len(dicom_files) >= self.num_images_per_class:
                     selected_files = random.sample(dicom_files, self.num_images_per_class)
                 else:
