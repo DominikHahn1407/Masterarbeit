@@ -21,9 +21,9 @@ class TransferLearningModel:
         self.criterion = nn.CrossEntropyLoss()
         self.optimizer = optim.Adam(self.model.fc.parameters(), lr=learning_rate)
 
-    def train(self, train_loader, epochs=5):
-        self.model.train()
+    def train(self, train_loader, early_stopping, epochs=5):
         for epoch in range(epochs):
+            self.model.train()
             running_loss = 0.0
             correct = 0
             total = 0
@@ -44,6 +44,11 @@ class TransferLearningModel:
             epoch_loss = running_loss / len(train_loader.dataset)
             epoch_acc = 100 * correct / total
             print(f"Loss: {epoch_loss:.4f}, Accuracy: {epoch_acc:.2f}%")
+
+            early_stopping(epoch_loss)
+            if early_stopping.early_stop:
+                print("Early stopping triggered")
+                break
 
     def evaluate(self, test_loader):
         self.model.eval()
