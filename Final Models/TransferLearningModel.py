@@ -113,6 +113,8 @@ class TransferLearningModel(nn.Module):
 
         for epoch in range(epochs):
             self.model.train()
+            if self.model_name == "inception":
+                self.model.aux_logits = True
             running_loss = 0.0
             correct = 0
             total = 0         
@@ -132,6 +134,7 @@ class TransferLearningModel(nn.Module):
 
                 loss.backward()
                 self.optimizer.step()
+
                 running_loss += loss.item() * inputs.size(0)
                 _, predicted = logits.max(1)
                 total += labels.size(0)
@@ -142,6 +145,8 @@ class TransferLearningModel(nn.Module):
             self.train_losses.append(epoch_loss)
 
             self.model.eval()
+            if self.model_name == "inception":
+                self.model.aux_logits = False
             val_running_loss = 0.0
             val_correct = 0
             val_total = 0
