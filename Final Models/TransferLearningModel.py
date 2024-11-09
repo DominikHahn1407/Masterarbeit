@@ -8,7 +8,7 @@ import torch.optim as optim
 from torchvision import transforms
 from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay
 from torchvision import models
-from torchvision.models import ResNet18_Weights, DenseNet121_Weights, Inception_V3_Weights, EfficientNet_B0_Weights, ViT_B_16_Weights
+from torchvision.models import ResNet50_Weights, DenseNet121_Weights, Inception_V3_Weights, EfficientNet_B0_Weights, ViT_B_16_Weights
 
 
 class TransferLearningModel(nn.Module):
@@ -20,7 +20,7 @@ class TransferLearningModel(nn.Module):
         self.model = None
         # Initialize the model based on model_name
         if self.model_name == "resnet":
-            self.model = models.resnet18(weights=ResNet18_Weights.IMAGENET1K_V1)
+            self.model = models.resnet50(weights=ResNet50_Weights.IMAGENET1K_V1)
             in_features = self.model.fc.in_features
             self.model.fc = nn.Linear(in_features, len(self.classes))
         
