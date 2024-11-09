@@ -28,14 +28,16 @@ class TransferLearningModel(nn.Module):
         self.optimizer = optim.Adam(self.model.fc.parameters(), lr=learning_rate)
         self.scheduler = optim.lr_scheduler.ReduceLROnPlateau(self.optimizer, mode="min", factor=0.1, patience=2)
 
-    def train(self, train_loader, early_stopping, epochs=5):
-        min_loss = None
+    def train(self, train_loader, val_loader, early_stopping, epochs=5):
+        min_val_loss = None
         weight_file_name = f"weights/{self.model_name}.pt"
+        self.train_losses = []
+        self.val_losses = []
 
-        if min_loss == None and os.path.exists(weight_file_name):
+        if min_val_loss is None and os.path.exists(weight_file_name):
             print("Weights already exist, start from best previous values.")
             checkpoint = torch.load(weight_file_name, weights_only=False)
-            min_loss = checkpoint["loss"]
+            min_val_loss = checkpoint["loss"]
             self.model.load_state_dict(checkpoint["model_state_dict"])
 
         for epoch in range(epochs):
@@ -58,17 +60,37 @@ class TransferLearningModel(nn.Module):
             
             epoch_loss = running_loss / len(train_loader.dataset)
             epoch_acc = 100 * correct / total
-            print(f"Epoch {epoch+1}/{epochs} ----- Loss: {epoch_loss:.4f}, Accuracy: {epoch_acc:.2f}%")
+            self.train_losses.append(epoch_loss)
 
-            if min_loss == None or epoch_loss < min_loss:
-                min_loss = epoch_loss
+            self.model.eval()
+            val_running_loss = 0.0
+            val_correct = 0
+            val_total = 0
+
+            with torch.no_grad():
+                for inputs, labels in val_loader:
+                    inputs, labels = inputs.to(self.device), labels.to(self.device)
+                    outputs = self.model(inputs)
+                    val_loss = self.criterion(outputs, labels)
+                    val_running_loss += val_loss.item() * inputs.size(0)
+                    _, val_predicted = outputs.max(1)
+                    val_total += labels.size(0)
+                    val_correct += val_predicted.eq(labels).sum().item()
+
+            val_epoch_loss = val_running_loss / len(val_loader.dataset)
+            val_epoch_acc = 100 * val_correct / val_total
+            self.val_losses.append(val_epoch_loss)
+            print(f"Epoch {epoch+1}/{epochs} ----- Loss: {epoch_loss:.4f}, Accuracy: {epoch_acc:.2f}% ----- Validation Loss: {val_epoch_loss:.4f}, Validation Accuracy: {val_epoch_acc:.2f}%")
+
+            if min_val_loss == None or val_epoch_loss < min_val_loss:
+                min_val_loss = val_epoch_loss
                 checkpoint = {
                     'model_state_dict': self.model.state_dict(),
-                    'loss': epoch_loss
+                    'loss': val_epoch_loss
                 }
                 torch.save(checkpoint, weight_file_name)
-            self.scheduler.step(epoch_loss)
-            early_stopping(epoch_loss)
+            self.scheduler.step(val_epoch_loss)
+            early_stopping(val_epoch_loss)
             if early_stopping.early_stop:
                 print("Early stopping triggered")
                 break
@@ -117,3 +139,13 @@ class TransferLearningModel(nn.Module):
             outputs = self.model(inputs)
             _, predicted = outputs.max(1)
         return predicted.cpu().numpy()
+    
+    def plot_loss(self):
+        plt.figure(figsize=(10, 6))
+        plt.plot(self.train_losses, label='Training Loss')
+        plt.plot(self.val_losses, label='Validation Loss')
+        plt.xlabel('Epochs')
+        plt.ylabel('Loss')
+        plt.title('Training and Validation Loss Over Epochs')
+        plt.legend()
+        plt.show()
