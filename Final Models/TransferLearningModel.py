@@ -5,8 +5,10 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 
+from torchvision import transforms
 from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay
 from torchvision import models
+from torchvision.models import ResNet18_Weights, DenseNet121_Weights, Inception_V3_Weights, EfficientNet_B0_Weights, ViT_B_16_Weights
 
 
 class TransferLearningModel(nn.Module):
@@ -16,17 +18,86 @@ class TransferLearningModel(nn.Module):
         self.device = device
         self.model_name = model_name
         self.model = None
+        # Initialize the model based on model_name
         if self.model_name == "resnet":
-            self.model = models.resnet18(pretrained=True)
+            self.model = models.resnet18(weights=ResNet18_Weights.IMAGENET1K_V1)
+            in_features = self.model.fc.in_features
+            self.model.fc = nn.Linear(in_features, len(self.classes))
+        
+        elif self.model_name == "densenet":
+            self.model = models.densenet121(weights=DenseNet121_Weights.IMAGENET1K_V1)
+            in_features = self.model.classifier.in_features
+            self.model.classifier = nn.Linear(in_features, len(self.classes))
+        
+        elif self.model_name == "inception":
+            self.model = models.inception_v3(weights=Inception_V3_Weights.IMAGENET1K_V1)
+            in_features = self.model.fc.in_features
+            self.model.fc = nn.Linear(in_features, len(self.classes))
+        
+        elif self.model_name == "efficientnet":
+            self.model = models.efficientnet_b0(weights=EfficientNet_B0_Weights.IMAGENET1K_V1)
+            in_features = self.model.classifier[1].in_features
+            self.model.classifier[1] = nn.Linear(in_features, len(self.classes))
+        
+        elif self.model_name == "vit":
+            self.model = models.vit_b_16(weights=ViT_B_16_Weights.IMAGENET1K_V1)
+            in_features = self.model.heads.head.in_features
+            self.model.heads.head = nn.Linear(in_features, len(self.classes))
+        
+        else:
+            raise ValueError(f"Model '{self.model_name}' is not supported.")
+        
+        # Set the transforms based on model requirements
+        self.train_transforms, self.test_transforms = self.get_transforms()
 
-        for param in self.model.parameters():
-            param.requires_grad = False
-        self.model.fc = nn.Linear(self.model.fc.in_features, len(self.classes))
+        # Freeze the feature extractor layers
+        for name, param in self.model.named_parameters():
+            if "fc" not in name and "classifier" not in name and "heads.head" not in name:  # Leave last layers unfrozen
+                param.requires_grad = False
+        # Move model to the specified device
         self.model = self.model.to(self.device)
 
+        # Define loss function and learning rate scheduler
         self.criterion = nn.CrossEntropyLoss()
-        self.optimizer = optim.Adam(self.model.fc.parameters(), lr=learning_rate)
-        self.scheduler = optim.lr_scheduler.ReduceLROnPlateau(self.optimizer, mode="min", factor=0.1, patience=2)
+        self.optimizer = optim.Adam(filter(lambda p: p.requires_grad, self.model.parameters()), lr=learning_rate)
+        self.scheduler = optim.lr_scheduler.ReduceLROnPlateau(self.optimizer, mode="min", factor=0.1, patience=5)
+
+    def get_transforms(self):
+        # Define common normalization
+        normalize = transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
+
+        if self.model_name == "inception":
+            # Inception requires 299x299 input images
+            train_transforms = transforms.Compose([
+                transforms.Grayscale(num_output_channels=3),
+                transforms.Resize((299, 299)),
+                transforms.RandomHorizontalFlip(),
+                transforms.ToTensor(),
+                normalize
+            ])
+            test_transforms = transforms.Compose([
+                transforms.Grayscale(num_output_channels=3),
+                transforms.Resize((299, 299)),
+                transforms.ToTensor(),
+                normalize
+            ])
+        else:
+            # Default input size for most other models is 224x224
+            train_transforms = transforms.Compose([
+                transforms.Grayscale(num_output_channels=3),
+                transforms.Resize((224, 224)),
+                transforms.RandomHorizontalFlip(),
+                transforms.ToTensor(),
+                normalize
+            ])
+            test_transforms = transforms.Compose([
+                transforms.Grayscale(num_output_channels=3),
+                transforms.Resize((224, 224)),
+                transforms.ToTensor(),
+                normalize
+            ])
+
+        return train_transforms, test_transforms
 
     def train(self, train_loader, val_loader, early_stopping, epochs=5):
         min_val_loss = None
@@ -50,11 +121,19 @@ class TransferLearningModel(nn.Module):
                 inputs, labels = inputs.to(self.device), labels.to(self.device)
                 self.optimizer.zero_grad()
                 outputs = self.model(inputs)
-                loss = self.criterion(outputs, labels)
+                # Handle Inception model output
+                if self.model_name == "inception":
+                    logits = outputs.logits  # Use the main logits output
+                    aux_logits = outputs.aux_logits
+                    loss = self.criterion(logits, labels) + 0.4 * self.criterion(aux_logits, labels)  # Combine with auxiliary loss
+                else:
+                    logits = outputs
+                    loss = self.criterion(logits, labels)
+
                 loss.backward()
                 self.optimizer.step()
                 running_loss += loss.item() * inputs.size(0)
-                _, predicted = outputs.max(1)
+                _, predicted = logits.max(1)
                 total += labels.size(0)
                 correct += predicted.eq(labels).sum().item()
             
