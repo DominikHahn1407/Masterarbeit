@@ -14,11 +14,12 @@ from CNN3D import CNN3D, Custom3DTransform
 
 
 class TransferLearningModel(nn.Module):
-    def __init__(self, classes, model_name, device='cuda' if torch.cuda.is_available() else 'cpu', learning_rate=0.001):
+    def __init__(self, classes, model_name, device='cuda' if torch.cuda.is_available() else 'cpu', learning_rate=0.001, data_augmentation=False):
         super(TransferLearningModel, self).__init__()
         self.classes = classes
         self.device = device
         self.model_name = model_name
+        self.data_augmentation = data_augmentation
         self.model = None
         # Initialize the model based on model_name
         if self.model_name == "resnet":
@@ -63,19 +64,19 @@ class TransferLearningModel(nn.Module):
         self.scheduler = optim.lr_scheduler.ReduceLROnPlateau(self.optimizer, mode="min", factor=0.1, patience=5)
 
     def get_transforms(self):
-        # Define common normalization
+        # Define common whitening normalization
         normalize = transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
 
         if self.model_name == "inception":
             self.resize_dim = (299, 299)
             # Inception requires 299x299 input images
-            train_transforms = transforms.Compose([
+            train_transforms = [
                 transforms.Grayscale(num_output_channels=3),
                 transforms.Resize(self.resize_dim),
                 transforms.RandomHorizontalFlip(),
                 transforms.ToTensor(),
                 normalize
-            ])
+            ]
             test_transforms = transforms.Compose([
                 transforms.Grayscale(num_output_channels=3),
                 transforms.Resize(self.resize_dim),
@@ -89,25 +90,36 @@ class TransferLearningModel(nn.Module):
         else:
             self.resize_dim = (224, 224)
             # Default input size for most other models is 224x224
-            train_transforms = transforms.Compose([
+            train_transforms = [
                 transforms.Grayscale(num_output_channels=3),
                 transforms.Resize(self.resize_dim),
                 transforms.RandomHorizontalFlip(),
                 transforms.ToTensor(),
                 normalize
-            ])
+            ]
             test_transforms = transforms.Compose([
                 transforms.Grayscale(num_output_channels=3),
                 transforms.Resize(self.resize_dim),
                 transforms.ToTensor(),
                 normalize
             ])
+        if self.data_augmentation and self.model_name != "3dcnn":
+            train_transforms += [
+                transforms.RandomRotation(degrees=15),        # Rotate by up to ±15 degrees
+                transforms.RandomResizedCrop((224, 224),      # Random crop and resize to simulate zooming
+                                scale=(0.8, 1.2),  # Scale for zoom in/out
+                                ratio=(0.9, 1.1)),
+                transforms.RandomAffine(degrees=0, shear=10), # Apply random shear with ±10 degrees
+            ]
+        train_transforms = transforms.Compose(train_transforms)
 
         return train_transforms, test_transforms
 
     def train(self, train_loader, val_loader, early_stopping, epochs=5):
         min_val_loss = None
         weight_file_name = f"weights/{self.model_name}.pt"
+        if self.data_augmentation:
+            weight_file_name = f"weights/augmented_{self.model_name}.pt"
         self.train_losses = []
         self.val_losses = []
 
