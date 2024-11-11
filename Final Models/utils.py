@@ -9,6 +9,7 @@ from PIL import Image
 from collections import Counter
 from torch.utils.data import Dataset
 
+
 class DICOMCoarseDataset(Dataset):
     def __init__(self, root_dir, num_images_per_class, classes, transform=None, scenario=1):
         random.seed(41)
@@ -78,6 +79,7 @@ class DICOMCoarseDataset(Dataset):
             axes[i].axis("off")
         plt.show()
 
+
 class DICOMFineDataset(Dataset):
     def __init__(self, root_dir, classes, transform=None):
         random.seed(41)
@@ -132,6 +134,87 @@ class DICOMFineDataset(Dataset):
                 image = image.squeeze().numpy()
             axes[i].imshow(image, cmap="gray")
             axes[i].set_title(f"Label: {list(self.classes.keys())[label]}")
+            axes[i].axis("off")
+        plt.show()
+
+
+class DicomCoarseDataset3D(Dataset):
+    def __init__(self, root_dir, num_images_per_class, classes, transform=None, scenario=1, num_slices=16):
+        random.seed(41)
+        self.root_dir = root_dir
+        self.num_images_per_class = num_images_per_class
+        self.classes = classes
+        self.transform = transform
+        self.num_slices = num_slices
+        self.image_volumes = []
+        self.labels = []
+
+        for class_label, class_name in enumerate(self.classes):
+            class_folder = os.path.join(root_dir, class_name)
+            if os.path.isdir(class_folder):
+                dicom_files = sorted([f for f in os.listdir(class_folder) if f.endswith('.dcm')])
+
+                # Scenario handling for non-nodule files
+                if class_name == "non-nodule":
+                    if scenario == 2:
+                        dicom_files = [f for f in dicom_files if f.startswith('N')]
+                    elif scenario == 3:
+                        dicom_files = [f for f in dicom_files if not f.startswith('N')]
+
+                # Group files into 3D volumes based on num_slices
+                for i in range(0, len(dicom_files), self.num_slices):
+                    volume_files = dicom_files[i:i + self.num_slices]
+                    if len(volume_files) == self.num_slices:
+                        volume_paths = [os.path.join(class_folder, f) for f in volume_files]
+                        self.image_volumes.append(volume_paths)
+                        self.labels.append(class_label)
+
+    def __len__(self):
+        return len(self.image_volumes)
+    
+    def __getitem__(self, index):
+        volume_paths = self.image_volumes[index]
+        volume_slices = []
+
+        for path in volume_paths:
+            dicom_image = pydicom.dcmread(path)
+            image = dicom_image.pixel_array
+            image = Image.fromarray(np.uint8(image))
+            volume_slices.append(image)
+
+        volume = np.stack([np.array(slice_img) for slice_img in volume_slices], axis=0)
+        if self.transform:
+            volume = self.transform(volume)
+        label = self.labels[index]
+        return volume, label
+    
+    def get_labels(self):
+        return self.labels
+    
+    def display_label_distribution(self):
+        label_counts = Counter(self.labels)
+        labels, counts = zip(*label_counts.items())
+        plt.bar(labels, counts)
+        plt.xlabel("Label")
+        plt.ylabel("Count")
+        plt.title("Label Distribution")
+        plt.xticks(labels, [self.classes[label] for label in labels])
+        plt.show()
+
+    def visualize_volumes(self, num_volumes=3):
+        num_volumes = min(num_volumes, len(self.image_volumes))
+        _, axes = plt.subplots(1, num_volumes, figsize=(15, 15))
+        if num_volumes == 1:
+            axes = [axes]
+        for i in range(num_volumes):
+            random_index = random.randint(0, len(self.image_volumes) - 1)
+            volume, label = self.__getitem__(random_index)
+            if isinstance(volume, torch.Tensor):
+                volume = volume.squeeze().numpy()
+            # Display middle slice of the 3D volume
+            mid_slice = volume[len(volume) // 2]
+            axes[i].imshow(mid_slice, cmap="gray")
+            axes[i].set_title(f"Label: {self.classes[label]}")
             axes[i].axis("off")
         plt.show()
 

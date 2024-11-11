@@ -10,6 +10,8 @@ from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay
 from torchvision import models
 from torchvision.models import ResNet50_Weights, DenseNet121_Weights, Inception_V3_Weights, EfficientNet_B0_Weights, ViT_B_16_Weights
 
+from CNN3D import CNN3D, Custom3DTransform
+
 
 class TransferLearningModel(nn.Module):
     def __init__(self, classes, model_name, device='cuda' if torch.cuda.is_available() else 'cpu', learning_rate=0.001):
@@ -22,28 +24,26 @@ class TransferLearningModel(nn.Module):
         if self.model_name == "resnet":
             self.model = models.resnet50(weights=ResNet50_Weights.IMAGENET1K_V1)
             in_features = self.model.fc.in_features
-            self.model.fc = nn.Linear(in_features, len(self.classes))
-        
+            self.model.fc = nn.Linear(in_features, len(self.classes))        
         elif self.model_name == "densenet":
             self.model = models.densenet121(weights=DenseNet121_Weights.IMAGENET1K_V1)
             in_features = self.model.classifier.in_features
             self.model.classifier = nn.Linear(in_features, len(self.classes))
-        
         elif self.model_name == "inception":
             self.model = models.inception_v3(weights=Inception_V3_Weights.IMAGENET1K_V1)
             in_features = self.model.fc.in_features
             self.model.fc = nn.Linear(in_features, len(self.classes))
-        
         elif self.model_name == "efficientnet":
             self.model = models.efficientnet_b0(weights=EfficientNet_B0_Weights.IMAGENET1K_V1)
             in_features = self.model.classifier[1].in_features
             self.model.classifier[1] = nn.Linear(in_features, len(self.classes))
-        
         elif self.model_name == "vit":
             self.model = models.vit_b_16(weights=ViT_B_16_Weights.IMAGENET1K_V1)
             in_features = self.model.heads.head.in_features
             self.model.heads.head = nn.Linear(in_features, len(self.classes))
-        
+        elif self.model_name == "3dcnn":
+            self.get_transforms()
+            self.model = CNN3D(image_size=self.resize_dim[0], classes=self.classes)
         else:
             raise ValueError(f"Model '{self.model_name}' is not supported.")
         
@@ -67,32 +67,38 @@ class TransferLearningModel(nn.Module):
         normalize = transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
 
         if self.model_name == "inception":
+            self.resize_dim = (299, 299)
             # Inception requires 299x299 input images
             train_transforms = transforms.Compose([
                 transforms.Grayscale(num_output_channels=3),
-                transforms.Resize((299, 299)),
+                transforms.Resize(self.resize_dim),
                 transforms.RandomHorizontalFlip(),
                 transforms.ToTensor(),
                 normalize
             ])
             test_transforms = transforms.Compose([
                 transforms.Grayscale(num_output_channels=3),
-                transforms.Resize((299, 299)),
+                transforms.Resize(self.resize_dim),
                 transforms.ToTensor(),
                 normalize
             ])
+        elif self.model_name == "3dcnn":
+            self.resize_dim = (224, 224)
+            train_transforms = Custom3DTransform(resize=self.resize_dim, flip_prob=0.5)
+            test_transforms = Custom3DTransform(resize=self.resize_dim, flip_prob=0.0)
         else:
+            self.resize_dim = (224, 224)
             # Default input size for most other models is 224x224
             train_transforms = transforms.Compose([
                 transforms.Grayscale(num_output_channels=3),
-                transforms.Resize((224, 224)),
+                transforms.Resize(self.resize_dim),
                 transforms.RandomHorizontalFlip(),
                 transforms.ToTensor(),
                 normalize
             ])
             test_transforms = transforms.Compose([
                 transforms.Grayscale(num_output_channels=3),
-                transforms.Resize((224, 224)),
+                transforms.Resize(self.resize_dim),
                 transforms.ToTensor(),
                 normalize
             ])
