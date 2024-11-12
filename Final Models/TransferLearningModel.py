@@ -73,7 +73,6 @@ class TransferLearningModel(nn.Module):
             train_transforms = [
                 transforms.Grayscale(num_output_channels=3),
                 transforms.Resize(self.resize_dim),
-                transforms.RandomHorizontalFlip(),
                 transforms.ToTensor(),
                 normalize
             ]
@@ -93,7 +92,6 @@ class TransferLearningModel(nn.Module):
             train_transforms = [
                 transforms.Grayscale(num_output_channels=3),
                 transforms.Resize(self.resize_dim),
-                transforms.RandomHorizontalFlip(),
                 transforms.ToTensor(),
                 normalize
             ]
@@ -104,7 +102,8 @@ class TransferLearningModel(nn.Module):
                 normalize
             ])
         if self.data_augmentation and self.model_name != "3dcnn":
-            train_transforms += [
+            train_transforms += [                
+                transforms.RandomHorizontalFlip(),
                 transforms.RandomRotation(degrees=15),        # Rotate by up to ±15 degrees
                 transforms.RandomResizedCrop((224, 224),      # Random crop and resize to simulate zooming
                                 scale=(0.8, 1.2),  # Scale for zoom in/out
