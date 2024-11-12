@@ -6,6 +6,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from PIL import Image
+from torchvision import transforms
 
 
 class CNN3D(nn.Module):
@@ -21,7 +22,7 @@ class CNN3D(nn.Module):
         x = F.relu(self.conv1(x))
         x = self.pool(x)
         x = F.relu(self.conv2(x))
-        x = self.pool(x)
+        # x = self.pool(x)
         x = x.view(x.size(0), -1)
         x = F.relu(self.fc1(x))
         x = self.fc2(x)
@@ -30,7 +31,7 @@ class CNN3D(nn.Module):
 
 class Custom3DTransform:
     def __init__(self, resize=(224, 224), num_channels=3, normalize_means=(0.485, 0.456, 0.406), normalize_stds=(0.229, 0.224, 0.225), flip_prob=0.5):
-        self.resize = resize
+        self.resize_value = resize
         self.num_channels = num_channels
         self.normalize_means = normalize_means
         self.normalize_stds = normalize_stds
@@ -45,7 +46,7 @@ class Custom3DTransform:
     
     def resize(self, volume):
         # Resize each frame
-        return np.array([np.array(Image.fromarray(frame).resize(self.resize)) for frame in volume])
+        return np.array([np.array(Image.fromarray(np.transpose(frame, (1,2,0))).resize(self.resize_value)) for frame in volume])
     
     def random_horizontal_flip(self, volume):
         if random.random() < self.flip_prob:
@@ -54,7 +55,7 @@ class Custom3DTransform:
     
     def normalize(self, volume):
         # Normalize each channel in each frame
-        volume = (volume - np.array(self.normalize_means)[:, None, None]) / np.array(self.normalize_stds)[:, None, None]
+        volume = (volume - np.array(self.normalize_means)[None, None, None, :]) / np.array(self.normalize_stds)[None, None, None, :]
         return volume
     
     def to_tensor(self, volume):
