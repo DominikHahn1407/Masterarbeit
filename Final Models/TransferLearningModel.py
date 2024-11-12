@@ -10,40 +10,41 @@ from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay
 from torchvision import models
 from torchvision.models import ResNet50_Weights, DenseNet121_Weights, Inception_V3_Weights, EfficientNet_B0_Weights, ViT_B_16_Weights
 
+from CNN3D import CNN3D, Custom3DTransform
+
 
 class TransferLearningModel(nn.Module):
-    def __init__(self, classes, model_name, device='cuda' if torch.cuda.is_available() else 'cpu', learning_rate=0.001):
+    def __init__(self, classes, model_name, device='cuda' if torch.cuda.is_available() else 'cpu', learning_rate=0.001, data_augmentation=False):
         super(TransferLearningModel, self).__init__()
         self.classes = classes
         self.device = device
         self.model_name = model_name
+        self.data_augmentation = data_augmentation
         self.model = None
         # Initialize the model based on model_name
         if self.model_name == "resnet":
             self.model = models.resnet50(weights=ResNet50_Weights.IMAGENET1K_V1)
             in_features = self.model.fc.in_features
-            self.model.fc = nn.Linear(in_features, len(self.classes))
-        
+            self.model.fc = nn.Linear(in_features, len(self.classes))        
         elif self.model_name == "densenet":
             self.model = models.densenet121(weights=DenseNet121_Weights.IMAGENET1K_V1)
             in_features = self.model.classifier.in_features
             self.model.classifier = nn.Linear(in_features, len(self.classes))
-        
         elif self.model_name == "inception":
             self.model = models.inception_v3(weights=Inception_V3_Weights.IMAGENET1K_V1)
             in_features = self.model.fc.in_features
             self.model.fc = nn.Linear(in_features, len(self.classes))
-        
         elif self.model_name == "efficientnet":
             self.model = models.efficientnet_b0(weights=EfficientNet_B0_Weights.IMAGENET1K_V1)
             in_features = self.model.classifier[1].in_features
             self.model.classifier[1] = nn.Linear(in_features, len(self.classes))
-        
         elif self.model_name == "vit":
             self.model = models.vit_b_16(weights=ViT_B_16_Weights.IMAGENET1K_V1)
             in_features = self.model.heads.head.in_features
             self.model.heads.head = nn.Linear(in_features, len(self.classes))
-        
+        elif self.model_name == "3dcnn":
+            self.get_transforms()
+            self.model = CNN3D(image_size=self.resize_dim[0], classes=self.classes)
         else:
             raise ValueError(f"Model '{self.model_name}' is not supported.")
         
@@ -63,45 +64,61 @@ class TransferLearningModel(nn.Module):
         self.scheduler = optim.lr_scheduler.ReduceLROnPlateau(self.optimizer, mode="min", factor=0.1, patience=5)
 
     def get_transforms(self):
-        # Define common normalization
+        # Define common whitening normalization
         normalize = transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
 
         if self.model_name == "inception":
+            self.resize_dim = (299, 299)
             # Inception requires 299x299 input images
-            train_transforms = transforms.Compose([
+            train_transforms = [
                 transforms.Grayscale(num_output_channels=3),
-                transforms.Resize((299, 299)),
-                transforms.RandomHorizontalFlip(),
+                transforms.Resize(self.resize_dim),
                 transforms.ToTensor(),
                 normalize
-            ])
+            ]
             test_transforms = transforms.Compose([
                 transforms.Grayscale(num_output_channels=3),
-                transforms.Resize((299, 299)),
+                transforms.Resize(self.resize_dim),
                 transforms.ToTensor(),
                 normalize
             ])
+        elif self.model_name == "3dcnn":
+            self.resize_dim = (224, 224)
+            train_transforms = Custom3DTransform(resize=self.resize_dim, flip_prob=0.5)
+            test_transforms = Custom3DTransform(resize=self.resize_dim, flip_prob=0.0)
         else:
+            self.resize_dim = (224, 224)
             # Default input size for most other models is 224x224
-            train_transforms = transforms.Compose([
+            train_transforms = [
                 transforms.Grayscale(num_output_channels=3),
-                transforms.Resize((224, 224)),
-                transforms.RandomHorizontalFlip(),
+                transforms.Resize(self.resize_dim),
                 transforms.ToTensor(),
                 normalize
-            ])
+            ]
             test_transforms = transforms.Compose([
                 transforms.Grayscale(num_output_channels=3),
-                transforms.Resize((224, 224)),
+                transforms.Resize(self.resize_dim),
                 transforms.ToTensor(),
                 normalize
             ])
+        if self.data_augmentation and self.model_name != "3dcnn":
+            train_transforms += [                
+                transforms.RandomHorizontalFlip(),
+                transforms.RandomRotation(degrees=15),        # Rotate by up to ±15 degrees
+                transforms.RandomResizedCrop((224, 224),      # Random crop and resize to simulate zooming
+                                scale=(0.8, 1.2),  # Scale for zoom in/out
+                                ratio=(0.9, 1.1)),
+                transforms.RandomAffine(degrees=0, shear=10), # Apply random shear with ±10 degrees
+            ]
+        train_transforms = transforms.Compose(train_transforms)
 
         return train_transforms, test_transforms
 
     def train(self, train_loader, val_loader, early_stopping, epochs=5):
         min_val_loss = None
         weight_file_name = f"weights/{self.model_name}.pt"
+        if self.data_augmentation:
+            weight_file_name = f"weights/augmented_{self.model_name}.pt"
         self.train_losses = []
         self.val_losses = []
 

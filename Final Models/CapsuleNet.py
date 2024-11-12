@@ -129,13 +129,13 @@ class CapsuleNetwork(nn.Module):
         print('Test Loss: {:.8f}\n'.format(avg_test_loss))
         for i in range(self.num_classes):
             if class_total[i] > 0:
-                print('Test Accuracy of %5s: %2d%% (%2d/%2d)' % (
+                print('Test Accuracy of %5s: %.2f%% (%2d/%2d)' % (
                     str(i), 100 * class_correct[i] / class_total[i],
                     np.sum(class_correct[i]), np.sum(class_total[i])))
             else:
                 print('Test Accuracy of %5s: N/A (no training examples)' % (class_total[i]))
 
-        print('\nTest Accuracy (Overall): %2d%% (%2d/%2d)' % (
+        print('\nTest Accuracy (Overall): %.2f%% (%2d/%2d)' % (
             100. * np.sum(class_correct) / np.sum(class_total),
             np.sum(class_correct), np.sum(class_total)))
         self.display_confusion_matrix(torch.tensor(true_labels), torch.tensor(pred_labels))
