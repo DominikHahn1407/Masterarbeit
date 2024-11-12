@@ -12,25 +12,44 @@ from torchvision import transforms
 class CNN3D(nn.Module):
     def __init__(self, image_size, classes):
         super(CNN3D, self).__init__()
-        self.conv1 = nn.Conv3d(image_size, 32, kernel_size=3, stride=1, padding=1)
-        self.conv2 = nn.Conv3d(32, 64, kernel_size=3, stride=1, padding=1)
-        self.pool = nn.MaxPool3d(kernel_size=2)
-        self.fc1 = nn.Linear(64 * 4 * 4 * 4, 128)
+        self.conv_layer1 = self._conv_layer_set(1, 32)
+        self.conv_layer2 = self._conv_layer_set(32, 64)
+        # Calculate the flattened size after convolutions
+        # Assuming input size is (32, 1, 16, 224, 224) and two conv + maxpool layers
+        # After the first Conv3D shape will be (32, 32, 14, 222, 222)
+        # After the first MaxPool3D, shape will be (32, 32, 7, 111, 111)
+        # After the second Conv3D, shape will be (32, 64, 5, 109, 109)
+        # After the second MaxPool3D, shape will be (32, 64, 2, 54, 54)
+        self.fc1 = nn.Linear(64 * 2 * 54 * 54, 128)
         self.fc2 = nn.Linear(128, len(classes))
+        self.relu = nn.LeakyReLU()
+        self.batch_norm = nn.BatchNorm1d(128)
+        self.dropout = nn.Dropout(p=0.15)
+        
+    def _conv_layer_set(self, in_c, out_c):
+        return nn.Sequential(
+            nn.Conv3d(in_c, out_c, kernel_size=(3,3,3), padding=0),
+            nn.LeakyReLU(),
+            nn.MaxPool3d((2,2,2)),
+        )
     
     def forward(self, x):
-        x = F.relu(self.conv1(x))
-        x = self.pool(x)
-        x = F.relu(self.conv2(x))
-        # x = self.pool(x)
-        x = x.view(x.size(0), -1)
-        x = F.relu(self.fc1(x))
-        x = self.fc2(x)
-        return x
+        # Input shape: [batch_size, 1, num_slices, image_size, image_size]
+        out = self.conv_layer1(x)
+        out = self.conv_layer2(out)
+
+        # Flatten output for fc
+        out = out.view(out.size(0), -1)
+        out = self.fc1(out)
+        out = self.relu(out)
+        out = self.batch_norm(out)
+        out = self.dropout(out)
+        out = self.fc2(out)
+        return out
     
 
 class Custom3DTransform:
-    def __init__(self, resize=(224, 224), num_channels=3, normalize_means=(0.485, 0.456, 0.406), normalize_stds=(0.229, 0.224, 0.225), flip_prob=0.5):
+    def __init__(self, resize=(224, 224), num_channels=1, normalize_means=0.485, normalize_stds=0.229, flip_prob=0.5):
         self.resize_value = resize
         self.num_channels = num_channels
         self.normalize_means = normalize_means
@@ -46,7 +65,7 @@ class Custom3DTransform:
     
     def resize(self, volume):
         # Resize each frame
-        return np.array([np.array(Image.fromarray(np.transpose(frame, (1,2,0))).resize(self.resize_value)) for frame in volume])
+        return np.array([np.array(Image.fromarray(frame).resize(self.resize_value)) for frame in volume])
     
     def random_horizontal_flip(self, volume):
         if random.random() < self.flip_prob:
@@ -55,11 +74,12 @@ class Custom3DTransform:
     
     def normalize(self, volume):
         # Normalize each channel in each frame
-        volume = (volume - np.array(self.normalize_means)[None, None, None, :]) / np.array(self.normalize_stds)[None, None, None, :]
+        volume = (volume - self.normalize_means) / self.normalize_stds
         return volume
     
     def to_tensor(self, volume):
-        return torch.tensor(volume, dtype=torch.float32).permute(1, 0, 2, 3)
+        volume = np.expand_dims(volume, axis=0)
+        return torch.tensor(volume, dtype=torch.float32)
     
     def __call__(self, volume):
         volume = self.grayscale(volume)

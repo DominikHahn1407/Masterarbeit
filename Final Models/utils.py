@@ -161,18 +161,25 @@ class DicomCoarseDataset3D(Dataset):
                     elif scenario == 3:
                         dicom_files = [f for f in dicom_files if not f.startswith('N')]
 
+                if len(dicom_files) >= self.num_images_per_class:
+                    selected_files = random.sample(dicom_files, self.num_images_per_class)
+                else:
+                    selected_files = dicom_files
+                    
                 # Group files into 3D volumes based on num_slices
-                for i in range(0, len(dicom_files), self.num_slices):
-                    volume_files = dicom_files[i:i + self.num_slices]
+                for i in range(0, len(selected_files), self.num_slices):
+                    volume_files = selected_files[i:i + self.num_slices]
                     if len(volume_files) == self.num_slices:
                         volume_paths = [os.path.join(class_folder, f) for f in volume_files]
+                        # Is a list of lists with 10 paths
                         self.image_volumes.append(volume_paths)
                         self.labels.append(class_label)
 
     def __len__(self):
+        # lenght of outer list (amount of volumes)
         return len(self.image_volumes)
     
-    def __getitem__(self, index):
+    def __getitem__(self, index, resize=(224,224)):
         volume_paths = self.image_volumes[index]
         volume_slices = []
 
@@ -180,6 +187,7 @@ class DicomCoarseDataset3D(Dataset):
             dicom_image = pydicom.dcmread(path)
             image = dicom_image.pixel_array
             image = Image.fromarray(np.uint8(image))
+            image = image.resize(resize)
             volume_slices.append(image)
 
         volume = np.stack([np.array(slice_img) for slice_img in volume_slices], axis=0)
