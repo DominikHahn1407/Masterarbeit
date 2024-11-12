@@ -14,12 +14,13 @@ from CNN3D import CNN3D, Custom3DTransform
 
 
 class TransferLearningModel(nn.Module):
-    def __init__(self, classes, model_name, device='cuda' if torch.cuda.is_available() else 'cpu', learning_rate=0.001, data_augmentation=False):
+    def __init__(self, classes, model_name, device='cuda' if torch.cuda.is_available() else 'cpu', learning_rate=0.001, data_augmentation=False, fine=False):
         super(TransferLearningModel, self).__init__()
         self.classes = classes
         self.device = device
         self.model_name = model_name
         self.data_augmentation = data_augmentation
+        self.fine = fine
         self.model = None
         # Initialize the model based on model_name
         if self.model_name == "resnet":
@@ -84,7 +85,7 @@ class TransferLearningModel(nn.Module):
             ])
         elif self.model_name == "3dcnn":
             self.resize_dim = (224, 224)
-            train_transforms = Custom3DTransform(resize=self.resize_dim, flip_prob=0.5)
+            train_transforms = Custom3DTransform(resize=self.resize_dim,  data_augmentation=self.data_augmentation, flip_prob=0.5)
             test_transforms = Custom3DTransform(resize=self.resize_dim, flip_prob=0.0)
         else:
             self.resize_dim = (224, 224)
@@ -116,9 +117,13 @@ class TransferLearningModel(nn.Module):
 
     def train(self, train_loader, val_loader, early_stopping, epochs=5):
         min_val_loss = None
-        weight_file_name = f"weights/{self.model_name}.pt"
+        weight_file_name = f"weights/coarse/{self.model_name}.pt"
         if self.data_augmentation:
-            weight_file_name = f"weights/augmented_{self.model_name}.pt"
+            weight_file_name = f"weights/coarse/augmented_{self.model_name}.pt"
+        if self.fine and self.data_augmentation:
+            weight_file_name = f"weights/fine/augmented_{self.model_name}.pt"
+        if self.fine and not self.data_augmentation:
+            weight_file_name = f"weights/fine/{self.model_name}.pt"
         self.train_losses = []
         self.val_losses = []
 
@@ -221,7 +226,7 @@ class TransferLearningModel(nn.Module):
 
                 true_labels.extend(labels.cpu().numpy())
                 pred_labels.extend(predicted.cpu().numpy())
-        
+
         avg_loss = running_loss / len(test_loader.dataset)
         accuracy = 100 * correct / total
         cm = confusion_matrix(true_labels, pred_labels)

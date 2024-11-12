@@ -226,6 +226,82 @@ class DicomCoarseDataset3D(Dataset):
             axes[i].axis("off")
         plt.show()
 
+class DicomFineDataset3D(Dataset):
+    def __init__(self, root_dir, classes, transform=None, num_slices=16):
+        random.seed(41)
+        self.root_dir = root_dir
+        self.classes = classes
+        self.transform = transform
+        self.num_slices = num_slices
+        self.image_volumes = []
+        self.labels = []
+
+        file_groups = {}
+        for file_name in os.listdir(root_dir):
+            if file_name.endswith(".dcm"):
+                prefix = file_name[0]
+                if prefix in self.classes:
+                    if prefix not in file_groups:
+                        file_groups[prefix] = []
+                    file_groups[prefix].append(os.path.join(root_dir, file_name))
+        for prefix, files in file_groups.items():
+            random.shuffle(files)
+            for i in range(0, len(files), self.num_slices):
+                volume_files = files[i: i + self.num_slices]
+                if len(volume_files) == self.num_slices: #Only include complete volumes
+                    self.image_volumes.append(volume_files)
+                    self.labels.append(self.classes.index(prefix))
+
+    def __len__(self):
+        # length of outer list (amount of volumes)
+        return len(self.image_volumes)
+    
+    def __getitem__(self, index, resize=(224,224)):
+        volume_paths = self.image_volumes[index]
+        volume_slices = []
+
+        for path in volume_paths:
+            dicom_image = pydicom.dcmread(path)
+            image = dicom_image.pixel_array
+            image = Image.fromarray(np.uint8(image))
+            image = image.resize(resize)
+            volume_slices.append(image)
+
+        volume = np.stack([np.array(slice_img) for slice_img in volume_slices], axis=0)
+        if self.transform:
+            volume = self.transform(volume)
+        label = self.labels[index]
+        return volume, label
+    
+    def get_labels(self):
+        return self.labels
+    
+    def display_label_distribution(self):
+        label_counts = Counter(self.labels)
+        labels, counts = zip(*label_counts.items())
+        plt.bar(labels, counts)
+        plt.xlabel("Label")
+        plt.ylabel("Count")
+        plt.title("Label Distribution")
+        plt.xticks(labels, [self.classes[label] for label in labels])
+        plt.show()
+
+    def visualize_volumes(self, num_volumes=3):
+        num_volumes = min(num_volumes, len(self.image_volumes))
+        _, axes = plt.subplots(1, num_volumes, figsize=(15, 15))
+        if num_volumes == 1:
+            axes = [axes]
+        for i in range(num_volumes):
+            random_index = random.randint(0, len(self.image_volumes) - 1)
+            volume, label = self.__getitem__(random_index)
+            if isinstance(volume, torch.Tensor):
+                volume = volume.squeeze().numpy()
+            # Display middle slice of the 3D volume
+            mid_slice = volume[len(volume) // 2]
+            axes[i].imshow(mid_slice, cmap="gray")
+            axes[i].set_title(f"Label: {self.classes[label]}")
+            axes[i].axis("off")
+        plt.show()
 
 def display_data_loader_batch(data_loader, classes):
     data_iter = iter(data_loader)

@@ -49,8 +49,9 @@ class CNN3D(nn.Module):
     
 
 class Custom3DTransform:
-    def __init__(self, resize=(224, 224), num_channels=1, normalize_means=0.485, normalize_stds=0.229, flip_prob=0.5):
+    def __init__(self, resize=(224, 224), data_augmentation=False, num_channels=1, normalize_means=0.485, normalize_stds=0.229, flip_prob=0.5):
         self.resize_value = resize
+        self.data_augmentation = data_augmentation
         self.num_channels = num_channels
         self.normalize_means = normalize_means
         self.normalize_stds = normalize_stds
@@ -84,6 +85,7 @@ class Custom3DTransform:
     def __call__(self, volume):
         volume = self.grayscale(volume)
         volume = self.resize(volume)
-        volume = self.random_horizontal_flip(volume)
+        if self.data_augmentation:
+            volume = self.random_horizontal_flip(volume)
         volume = self.normalize(volume)
         return self.to_tensor(volume)
