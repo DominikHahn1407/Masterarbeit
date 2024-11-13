@@ -20,6 +20,10 @@ class DICOMCoarseDataset(Dataset):
         self.image_paths = []
         self.labels = []
 
+        if scenario == 2:
+            temp_folder = os.path.join(root_dir, "non-nodule")
+            self.num_images_per_class = len([f for f in os.listdir(temp_folder) if f.endswith('.dcm') and f.startswith('N')])
+
         for class_label, class_name in enumerate(self.classes):
             class_folder = os.path.join(root_dir, class_name)
             if os.path.isdir(class_folder):
@@ -37,6 +41,7 @@ class DICOMCoarseDataset(Dataset):
                 for file_name in selected_files:
                     self.image_paths.append(os.path.join(class_folder, file_name))
                     self.labels.append(class_label)
+        
 
     def __len__(self):
         return len(self.image_paths)
@@ -148,6 +153,10 @@ class DicomCoarseDataset3D(Dataset):
         self.num_slices = num_slices
         self.image_volumes = []
         self.labels = []
+
+        if scenario == 2:
+            temp_folder = os.path.join(root_dir, "non-nodule")
+            self.num_images_per_class = len([f for f in os.listdir(temp_folder) if f.endswith('.dcm') and f.startswith('N')])
 
         for class_label, class_name in enumerate(self.classes):
             class_folder = os.path.join(root_dir, class_name)

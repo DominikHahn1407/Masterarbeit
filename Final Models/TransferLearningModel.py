@@ -8,19 +8,20 @@ import torch.optim as optim
 from torchvision import transforms
 from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay
 from torchvision import models
-from torchvision.models import ResNet50_Weights, DenseNet121_Weights, Inception_V3_Weights, EfficientNet_B0_Weights, ViT_B_16_Weights
+from torchvision.models import ResNet50_Weights, DenseNet121_Weights, Inception_V3_Weights, EfficientNet_B0_Weights, EfficientNet_B7_Weights, EfficientNet_V2_L_Weights, ViT_B_16_Weights
 
 from CNN3D import CNN3D, Custom3DTransform
 
 
 class TransferLearningModel(nn.Module):
-    def __init__(self, classes, model_name, device='cuda' if torch.cuda.is_available() else 'cpu', learning_rate=0.001, data_augmentation=False, fine=False):
+    def __init__(self, classes, model_name, device='cuda' if torch.cuda.is_available() else 'cpu', learning_rate=0.001, data_augmentation=False, fine=False, scenario=1):
         super(TransferLearningModel, self).__init__()
         self.classes = classes
         self.device = device
         self.model_name = model_name
         self.data_augmentation = data_augmentation
         self.fine = fine
+        self.scenario = scenario
         self.model = None
         # Initialize the model based on model_name
         if self.model_name == "resnet":
@@ -37,6 +38,14 @@ class TransferLearningModel(nn.Module):
             self.model.fc = nn.Linear(in_features, len(self.classes))
         elif self.model_name == "efficientnet":
             self.model = models.efficientnet_b0(weights=EfficientNet_B0_Weights.IMAGENET1K_V1)
+            in_features = self.model.classifier[1].in_features
+            self.model.classifier[1] = nn.Linear(in_features, len(self.classes))
+        elif self.model_name == "efficientnet2":
+            self.model = models.efficientnet_b7(weights=EfficientNet_B7_Weights.IMAGENET1K_V1)
+            in_features = self.model.classifier[1].in_features
+            self.model.classifier[1] = nn.Linear(in_features, len(self.classes))
+        elif self.model_name == "efficientnet3":
+            self.model = models.efficientnet_v2_l(weights=EfficientNet_V2_L_Weights.IMAGENET1K_V1)
             in_features = self.model.classifier[1].in_features
             self.model.classifier[1] = nn.Linear(in_features, len(self.classes))
         elif self.model_name == "vit":
@@ -117,9 +126,9 @@ class TransferLearningModel(nn.Module):
 
     def train(self, train_loader, val_loader, early_stopping, epochs=5):
         min_val_loss = None
-        weight_file_name = f"weights/coarse/{self.model_name}.pt"
+        weight_file_name = f"weights/coarse/scenario{self.scenario}/{self.model_name}.pt"
         if self.data_augmentation:
-            weight_file_name = f"weights/coarse/augmented_{self.model_name}.pt"
+            weight_file_name = f"weights/coarse/scenario{self.scenario}/augmented_{self.model_name}.pt"
         if self.fine and self.data_augmentation:
             weight_file_name = f"weights/fine/augmented_{self.model_name}.pt"
         if self.fine and not self.data_augmentation:
