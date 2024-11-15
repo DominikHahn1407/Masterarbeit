@@ -51,12 +51,13 @@ class CapsuleNetwork(nn.Module):
             train_on_gpu=train_on_gpu)
         self.decoder = Decoder(image_size=image_size, input_vector_length=out_channels_digit, hidden_dim=hidden_dim, num_classes=num_classes, train_on_gpu=train_on_gpu)
 
-    def forward(self, images):
-        primary_caps_output = self.primary_capsules(self.conv_layer(images))
+    def forward(self, images, boxes):
+        images_features, boxes = self.conv_layer(images, boxes)
+        primary_caps_output_images, primary_caps_output_boxes = self.primary_capsules(images_features, boxes)
         # squeeze removes dimensions of size 1 and then transpose 0 and 1 dim (10,20,1,1,16)-->(20,10,16)
-        caps_output = self.digit_capsules(primary_caps_output).squeeze().transpose(0,1)
-        reconstructions, y, boxes = self.decoder(caps_output)
-        return caps_output, reconstructions, y, boxes
+        caps_output_images, boxes = self.digit_capsules(primary_caps_output_images, boxes)
+        reconstructions, y, boxes_pred = self.decoder(caps_output_images, boxes)
+        return caps_output_images, reconstructions, y, boxes_pred
     
     def train_model(self, train_loader, criterion, optimizer, n_epochs, print_every=300):
         losses = []
@@ -147,11 +148,11 @@ class ConvLayer(nn.Module):
         super(ConvLayer, self).__init__()
         self.conv = nn.Conv2d(in_channels, out_channels, kernel_size, stride, padding)
     
-    def forward(self, x):
+    def forward(self, images, boxes):
         # new_image_size = ((input_size - kernel + 2*padding) / stride) + 1 f.e. ((280 - 9)/1)+1 = 272
         # (batch_size, out_channels, 
-        features = F.relu(self.conv(x))
-        return features
+        images_features = F.relu(self.conv(images))
+        return images_features, boxes
     
 class PrimaryCaps(nn.Module):
     # out channels is in channels divided by number of capsules
@@ -160,12 +161,13 @@ class PrimaryCaps(nn.Module):
         self.out_channels = out_channels
         self.capsules = nn.ModuleList([nn.Conv2d(in_channels, out_channels, kernel_size, stride, padding) for _ in range(num_capsules)])
 
-    def forward(self, x):
-        batch_size = x.size(0)
-        u = [capsule(x).view(batch_size, self.out_channels * capsule(x).shape[2] * capsule(x).shape[2], 1) for capsule in self.capsules]
-        u = torch.cat(u, dim=-1)
-        u_squash = self.squash(u)
-        return u_squash
+    def forward(self, images, boxes):
+        batch_size = images.size(0)
+        u_images = [capsule(images).view(batch_size, self.out_channels * capsule(images).shape[2] * capsule(images).shape[2], 1) for capsule in self.capsules]
+        u_images = torch.cat(u_images, dim=-1)
+        u_squash_images = self.squash(u_images)
+
+        return u_squash_images, boxes
     
     def squash(self, input_tensor):
         squared_norm = (input_tensor ** 2).sum(dim=-1, keepdim=True)
@@ -194,28 +196,30 @@ class DigitCaps(nn.Module):
         self.W = nn.Parameter(torch.randn((self.num_capsules, previous_out_channels*cropped_size*cropped_size, 
                                     self.in_channels, self.out_channels)))
 
-    def forward(self, u):
+    def forward(self, images, boxes):
         '''Defines the feedforward behavior.
            param u: the input; vectors from the previous PrimaryCaps layer
            return: a set of normalized, capsule output vectors
            '''
         # adding batch_size dims and stacking all u vectors
-        u = u[None, :, :, None, :] # doppelpunkt nimmt die dimension aus original, none added eine dimension mit länge 1
+        images = images[None, :, :, None, :] # doppelpunkt nimmt die dimension aus original, none added eine dimension mit länge 1
         # 4D weight matrix
         W = self.W[:, None, :, :, :]
         
         # calculating u_hat = W*u
-        u_hat = torch.matmul(u, W)
+        images_hat = torch.matmul(images, W)
         # getting the correct size of b_ij
         # setting them all to 0, initially
-        b_ij = torch.zeros(*u_hat.size())
+        b_ij = torch.zeros(*images_hat.size())
         # moving b_ij to GPU, if available
         if self.train_on_gpu:
             b_ij = b_ij.cuda()
 
         # update coupling coefficients and calculate v_j
-        v_j = dynamic_routing(b_ij, u_hat, self.squash, routing_iterations=3)
-        return v_j # return final vector outputs
+        v_j_images = dynamic_routing(b_ij, images_hat, self.squash, routing_iterations=3)
+
+   
+        return v_j_images.squeeze().transpose(0,1), boxes # return final vector outputs
     
     
     def squash(self, input_tensor):
@@ -242,20 +246,24 @@ class Decoder(nn.Module):
             nn.Sigmoid()
         )
         self.linear_boxes_layers = nn.Sequential(
-            nn.Linear(input_dim, math.floor(input_dim/2)),
+            nn.Linear(4, 8),
             nn.ReLU(inplace=True),
-            nn.Linear(math.floor(input_dim/2), 4),
+            nn.Linear(8, 16),
+            nn.ReLU(inplace=True),
+            nn.Linear(16, 8),
+            nn.ReLU(inplace=True),
+            nn.Linear(8, 4),
             nn.Sigmoid()
         )
         self.num_classes = num_classes
         self.train_on_gpu = train_on_gpu
 
-    def forward(self, x):
+    def forward(self, images, boxes):
         # x shape (20,10,16)
         # x**2 shape -> (20,10,16)
         # sum(dim-1) --> shape (20,10)
         # classes shape (20,10) --> batch / amount of classes
-        classes = (x ** 2).sum(dim=-1)**0.5
+        classes = (images ** 2).sum(dim=-1)**0.5
         # Applying softmax to the last dimension --> get most probable class at each batch
         classes = F.softmax(classes, dim=-1)      
         # select most probable class  for each image in batch array of length 20
@@ -266,11 +274,11 @@ class Decoder(nn.Module):
             sparse_matrix = sparse_matrix.cuda()
         # One-Hot-Encoding of the classes
         y = sparse_matrix.index_select(dim=0, index=max_length_indices.data)
-        x = x * y[:, :, None] # (20,10,16) * (20,10,1)
+        images = images * y[:, :, None] # (20,10,16) * (20,10,1)
         # flat x --> (20,160) 10*16
-        flattened_x = x.contiguous().view(x.size(0), -1)
+        flattened_x = images.contiguous().view(images.size(0), -1)
         reconstructions = self.linear_label_layers(flattened_x)
-        boxes = self.linear_boxes_layers(flattened_x)
+        boxes = self.linear_boxes_layers(boxes)
         # y = one hot encoded labels
         return reconstructions, y, boxes
     
