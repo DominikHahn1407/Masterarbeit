@@ -11,6 +11,7 @@ from torchvision import models
 from torchvision.models import ResNet50_Weights, DenseNet121_Weights, Inception_V3_Weights, EfficientNet_B0_Weights, EfficientNet_B7_Weights, EfficientNet_V2_L_Weights, ViT_B_16_Weights
 
 from CNN3D import CNN3D, Custom3DTransform
+from Unet import UNet
 
 
 class TransferLearningModel(nn.Module):
@@ -55,6 +56,8 @@ class TransferLearningModel(nn.Module):
         elif self.model_name == "3dcnn":
             self.get_transforms()
             self.model = CNN3D(image_size=self.resize_dim[0], classes=self.classes)
+        elif self.model_name == "unet":
+            self.model = UNet(3, len(self.classes), device)
         else:
             raise ValueError(f"Model '{self.model_name}' is not supported.")
         
@@ -95,7 +98,7 @@ class TransferLearningModel(nn.Module):
         elif self.model_name == "3dcnn":
             self.resize_dim = (224, 224)
             train_transforms = Custom3DTransform(resize=self.resize_dim,  data_augmentation=self.data_augmentation, flip_prob=0.5)
-            test_transforms = Custom3DTransform(resize=self.resize_dim, flip_prob=0.0)
+            test_transforms = Custom3DTransform(resize=self.resize_dim, data_augmentation=False, flip_prob=0.0)
         else:
             self.resize_dim = (224, 224)
             # Default input size for most other models is 224x224
@@ -120,7 +123,7 @@ class TransferLearningModel(nn.Module):
                                 ratio=(0.9, 1.1)),
                 transforms.RandomAffine(degrees=0, shear=10), # Apply random shear with ±10 degrees
             ]
-        train_transforms = transforms.Compose(train_transforms)
+            train_transforms = transforms.Compose(train_transforms)
 
         return train_transforms, test_transforms
 

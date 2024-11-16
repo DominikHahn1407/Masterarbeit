@@ -331,7 +331,43 @@ def display_data_loader_batch(data_loader, classes):
             image = image.squeeze(axis=-1)  # Remove the channel dimension for grayscale
         elif image.ndim == 2:
             image = image  # Grayscale images should remain 2D
-        axes[i].imshow(image, cmap="gray" if image.ndim == 2 else None)
+        axes[i].imshow(image, cmap="gray")
         axes[i].set_title(f"Label: {classes[labels[i].item()]}")
         axes[i].axis('off')
+    plt.show()
+
+def display_data_loader_batch_3d(data_loader, classes):
+    data_iter = iter(data_loader)
+    images, labels = next(data_iter)
+    # Number of images to display
+    num_images = min(len(images), 8)
+    _, axes = plt.subplots(1, num_images, figsize=(15, 15))
+    if num_images == 1:
+        axes = [axes]
+
+    for i in range(num_images):
+        # Move image to CPU and convert to NumPy
+        image = images[i].cpu().numpy()
+        
+        # Handle 3D images by selecting the middle slice along the depth axis
+        if image.ndim == 4:  # Shape: (C, D, H, W)
+            middle_slice = image[:, image.shape[1] // 2, :, :]  # Select middle slice along depth
+        elif image.ndim == 3:  # Shape: (D, H, W)
+            middle_slice = image[image.shape[0] // 2, :, :]  # Middle slice for grayscale
+        
+        # For 2D representation, ensure channels are handled
+        if middle_slice.ndim == 3 and middle_slice.shape[0] in [1, 3]:  # Shape: (C, H, W)
+            middle_slice = middle_slice.transpose(1, 2, 0)  # Convert to (H, W, C)
+        elif middle_slice.ndim == 2:  # Shape: (H, W)
+            middle_slice = middle_slice  # Grayscale images remain as-is
+
+        # Normalize to [0, 1] for visualization
+        middle_slice = (middle_slice - middle_slice.min()) / (middle_slice.max() - middle_slice.min())
+
+        # Display the image
+        axes[i].imshow(middle_slice, cmap="gray")
+        axes[i].set_title(f"Label: {classes[labels[i].item()]}")
+        axes[i].axis('off')
+    
+    plt.tight_layout()
     plt.show()

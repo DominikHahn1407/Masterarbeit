@@ -7,6 +7,7 @@ import torch.nn.functional as F
 
 from PIL import Image
 from torchvision import transforms
+from torchvision.transforms.functional import rotate, resized_crop, affine
 
 
 class CNN3D(nn.Module):
@@ -49,7 +50,8 @@ class CNN3D(nn.Module):
     
 
 class Custom3DTransform:
-    def __init__(self, resize=(224, 224), data_augmentation=False, num_channels=1, normalize_means=0.485, normalize_stds=0.229, flip_prob=0.5):
+    def __init__(self, resize=(224,224), data_augmentation=False, num_channels=1, normalize_means=0.485, normalize_stds=0.229, flip_prob=0.5):
+        super(Custom3DTransform, self).__init__()
         self.resize_value = resize
         self.data_augmentation = data_augmentation
         self.num_channels = num_channels
@@ -73,6 +75,29 @@ class Custom3DTransform:
             return np.array([np.fliplr(frame) for frame in volume])
         return volume
     
+    def random_rotation(self, volume, degrees=15):
+        angle = random.uniform(-degrees, degrees)
+        return np.array([np.array(rotate(Image.fromarray(frame), angle)) for frame in volume])
+    
+    def random_resized_crop(self, volume, scale=(0.8, 1.2), ratio=(0.9, 1.1)):
+        h, w = volume.shape[1:3]
+        crop_h = int(h * random.uniform(*scale))
+        crop_w = int(w * random.uniform(*ratio))
+        top = random.randint(0, h - crop_h)
+        left = random.randint(0, w - crop_w)
+        return np.array([
+            np.array(resized_crop(Image.fromarray(frame), top, left, crop_h, crop_w, self.resize_value))
+            for frame in volume
+        ])
+
+    def random_shear(self, volume, shear=10):
+        shear_x = random.uniform(-shear, shear)
+        shear_y = random.uniform(-shear, shear)
+        return np.array([
+            np.array(affine(Image.fromarray(frame), angle=0, translate=(0,0), scale=1.0, shear=(shear_x, shear_y))) 
+            for frame in volume
+        ])
+
     def normalize(self, volume):
         # Normalize each channel in each frame
         volume = (volume - self.normalize_means) / self.normalize_stds
@@ -82,10 +107,14 @@ class Custom3DTransform:
         volume = np.expand_dims(volume, axis=0)
         return torch.tensor(volume, dtype=torch.float32)
     
-    def __call__(self, volume):
+    def __call__(self, volume):#need to be overwritten cause the dataloader does overwrite init function
         volume = self.grayscale(volume)
-        volume = self.resize(volume)
         if self.data_augmentation:
             volume = self.random_horizontal_flip(volume)
+            volume = self.random_rotation(volume)
+            volume = self.random_resized_crop(volume)
+            volume = self.random_shear(volume)
+        else:
+            volume = self.resize(volume)
         volume = self.normalize(volume)
         return self.to_tensor(volume)
