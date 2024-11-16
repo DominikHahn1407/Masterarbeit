@@ -47,7 +47,6 @@ class CNN3D(nn.Module):
         out = self.dropout(out)
         out = self.fc2(out)
         return out
-    
 
 class Custom3DTransform:
     def __init__(self, resize=(224,224), data_augmentation=False, num_channels=1, normalize_means=0.485, normalize_stds=0.229, flip_prob=0.5):
@@ -81,8 +80,8 @@ class Custom3DTransform:
     
     def random_resized_crop(self, volume, scale=(0.8, 1.2), ratio=(0.9, 1.1)):
         h, w = volume.shape[1:3]
-        crop_h = int(h * random.uniform(*scale))
-        crop_w = int(w * random.uniform(*ratio))
+        crop_h = min(int(h * random.uniform(*scale)),h)
+        crop_w = min(int(w * random.uniform(*ratio)),w)
         top = random.randint(0, h - crop_h)
         left = random.randint(0, w - crop_w)
         return np.array([

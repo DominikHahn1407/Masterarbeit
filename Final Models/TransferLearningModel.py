@@ -97,8 +97,8 @@ class TransferLearningModel(nn.Module):
             ])
         elif self.model_name == "3dcnn":
             self.resize_dim = (224, 224)
-            train_transforms = Custom3DTransform(resize=self.resize_dim,  data_augmentation=self.data_augmentation, flip_prob=0.5)
-            test_transforms = Custom3DTransform(resize=self.resize_dim, data_augmentation=False, flip_prob=0.0)
+            train_transforms = Custom3DTransform(resize=self.resize_dim, data_augmentation=self.data_augmentation, flip_prob=0.5)
+            test_transforms = Custom3DTransform(resize=self.resize_dim, flip_prob=0.0)
         else:
             self.resize_dim = (224, 224)
             # Default input size for most other models is 224x224

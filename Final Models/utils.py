@@ -312,6 +312,20 @@ class DicomFineDataset3D(Dataset):
             axes[i].axis("off")
         plt.show()
 
+class TransformDataset(torch.utils.data.Dataset):
+    def __init__(self, base_dataset, transform=None):
+        self.base_dataset = base_dataset
+        self.transform = transform
+
+    def __getitem__(self, index):
+        sample, label = self.base_dataset[index]
+        if self.transform:
+            sample = self.transform(sample)
+        return sample, label
+
+    def __len__(self):
+        return len(self.base_dataset)
+
 def display_data_loader_batch(data_loader, classes):
     data_iter = iter(data_loader)
     images, labels = next(data_iter)
