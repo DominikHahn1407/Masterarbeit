@@ -123,6 +123,7 @@ class TransferLearningModel(nn.Module):
                                 ratio=(0.9, 1.1)),
                 transforms.RandomAffine(degrees=0, shear=10), # Apply random shear with ±10 degrees
             ]
+        if self.model_name != "3dcnn":
             train_transforms = transforms.Compose(train_transforms)
 
         return train_transforms, test_transforms
