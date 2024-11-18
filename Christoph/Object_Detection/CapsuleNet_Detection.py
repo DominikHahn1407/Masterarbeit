@@ -246,14 +246,28 @@ class Decoder(nn.Module):
             nn.Sigmoid()
         )
         self.linear_boxes_layers = nn.Sequential(
-            nn.Linear(4, 8),
-            nn.ReLU(inplace=True),
-            nn.Linear(8, 16),
-            nn.ReLU(inplace=True),
-            nn.Linear(16, 8),
-            nn.ReLU(inplace=True),
-            nn.Linear(8, 4),
-            nn.Sigmoid()
+            nn.Linear(4, 16),               # Erhöhung der Kapazität
+            nn.BatchNorm1d(16),             # Batch-Normalisierung für stabileres Training
+            nn.LeakyReLU(inplace=True),     # LeakyReLU statt ReLU, um Vanishing Gradient zu vermeiden
+            nn.Dropout(0.3),                # Dropout für Regularisierung
+            
+            nn.Linear(16, 32),              # Größere Zwischenschichten
+            nn.BatchNorm1d(32),             
+            nn.LeakyReLU(inplace=True),     
+            nn.Dropout(0.3),
+            
+            nn.Linear(32, 16),              
+            nn.BatchNorm1d(16),             
+            nn.LeakyReLU(inplace=True),     
+            nn.Dropout(0.3),
+            
+            nn.Linear(16, 8),               
+            nn.BatchNorm1d(8),              
+            nn.LeakyReLU(inplace=True),     
+            nn.Dropout(0.2),
+            
+            nn.Linear(8, 4),                # Ausgabegröße bleibt gleich
+            nn.Sigmoid()                    # Aktivierungsfunktion für Werte zwischen 0 und 1
         )
         self.num_classes = num_classes
         self.train_on_gpu = train_on_gpu
