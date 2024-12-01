@@ -95,6 +95,19 @@ class TransferLearningModel(nn.Module):
                 transforms.ToTensor(),
                 normalize
             ])
+            if self.data_augmentation:
+                test_transforms = transforms.Compose([
+                    transforms.Grayscale(num_output_channels=3),
+                    transforms.Resize(self.resize_dim),
+                    transforms.ToTensor(),
+                    normalize,
+                    transforms.RandomHorizontalFlip(),
+                    transforms.RandomRotation(degrees=15),        # Rotate by up to ±15 degrees
+                    transforms.RandomResizedCrop((299, 299),      # Random crop and resize to simulate zooming
+                                    scale=(0.8, 1.2),  # Scale for zoom in/out
+                                    ratio=(0.9, 1.1)),
+                    transforms.RandomAffine(degrees=0, shear=10)
+                ])
         elif self.model_name == "3dcnn":
             self.resize_dim = (224, 224)
             train_transforms = Custom3DTransform(resize=self.resize_dim, data_augmentation=self.data_augmentation, flip_prob=0.5)
@@ -114,7 +127,7 @@ class TransferLearningModel(nn.Module):
                 transforms.ToTensor(),
                 normalize
             ])
-        if self.data_augmentation and self.model_name != "3dcnn":
+        if self.data_augmentation and self.model_name != "3dcnn" and self.model_name != "inception":
             train_transforms += [                
                 transforms.RandomHorizontalFlip(),
                 transforms.RandomRotation(degrees=15),        # Rotate by up to ±15 degrees
@@ -131,7 +144,7 @@ class TransferLearningModel(nn.Module):
     def train(self, train_loader, val_loader, early_stopping, epochs=5):
         min_val_loss = None
         weight_file_name = f"weights/coarse/scenario{self.scenario}/{self.model_name}.pt"
-        if self.data_augmentation:
+        if self.data_augmentation and not self.fine:
             weight_file_name = f"weights/coarse/scenario{self.scenario}/augmented_{self.model_name}.pt"
         if self.fine and self.data_augmentation:
             weight_file_name = f"weights/fine/augmented_{self.model_name}.pt"
@@ -213,6 +226,8 @@ class TransferLearningModel(nn.Module):
             if early_stopping.early_stop:
                 print("Early stopping triggered")
                 break
+        loss_plot_path = weight_file_name.replace('.pt', '_loss_plot.png')
+        self.plot_loss(save_path=loss_plot_path)   
 
     def evaluate(self, test_loader):
         self.model.eval()
@@ -259,7 +274,7 @@ class TransferLearningModel(nn.Module):
             _, predicted = outputs.max(1)
         return predicted.cpu().numpy()
     
-    def plot_loss(self):
+    def plot_loss(self, save_path=None):
         plt.figure(figsize=(10, 6))
         plt.plot(self.train_losses, label='Training Loss')
         plt.plot(self.val_losses, label='Validation Loss')
@@ -267,4 +282,6 @@ class TransferLearningModel(nn.Module):
         plt.ylabel('Loss')
         plt.title('Training and Validation Loss Over Epochs')
         plt.legend()
+        if save_path:
+            plt.savefig(save_path)
         plt.show()

@@ -500,3 +500,16 @@ def find_overlapping_images(train_dataset, test_dataset):
     print(f"Found {len(overlaps)} overlapping images")
     for train_idx, test_idx in overlaps:
         print(f"Train index: {train_idx}, Test index: {test_idx}")
+
+class TensorFolderDataset(Dataset):
+    def __init__(self, folder_path):
+        self.folder_path = folder_path
+        self.file_list = [f for f in os.listdir(folder_path) if f.endswith('.pt')]
+
+    def __len__(self):
+        return len(self.file_list)
+    
+    def __getitem__(self, idx):
+        file_path = os.path.join(self.folder_path, self.file_list[idx])
+        data = torch.load(file_path)
+        return data['image'], data['label']                                  
