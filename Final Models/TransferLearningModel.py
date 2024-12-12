@@ -83,12 +83,12 @@ class TransferLearningModel(nn.Module):
         if self.model_name == "inception":
             self.resize_dim = (299, 299)
             # Inception requires 299x299 input images
-            train_transforms = [
+            train_transforms = transforms.Compose([
                 transforms.Grayscale(num_output_channels=3),
                 transforms.Resize(self.resize_dim),
                 transforms.ToTensor(),
                 normalize
-            ]
+            ])
             test_transforms = transforms.Compose([
                 transforms.Grayscale(num_output_channels=3),
                 transforms.Resize(self.resize_dim),
@@ -96,17 +96,17 @@ class TransferLearningModel(nn.Module):
                 normalize
             ])
             if self.data_augmentation:
-                test_transforms = transforms.Compose([
+                train_transforms = transforms.Compose([
                     transforms.Grayscale(num_output_channels=3),
                     transforms.Resize(self.resize_dim),
-                    transforms.ToTensor(),
-                    normalize,
                     transforms.RandomHorizontalFlip(),
                     transforms.RandomRotation(degrees=15),        # Rotate by up to ±15 degrees
-                    transforms.RandomResizedCrop((299, 299),      # Random crop and resize to simulate zooming
+                    transforms.RandomResizedCrop(self.resize_dim,      # Random crop and resize to simulate zooming
                                     scale=(0.8, 1.2),  # Scale for zoom in/out
                                     ratio=(0.9, 1.1)),
-                    transforms.RandomAffine(degrees=0, shear=10)
+                    transforms.RandomAffine(degrees=0, shear=10),                    
+                    transforms.ToTensor(),
+                    normalize
                 ])
         elif self.model_name == "3dcnn":
             self.resize_dim = (224, 224)
@@ -127,16 +127,16 @@ class TransferLearningModel(nn.Module):
                 transforms.ToTensor(),
                 normalize
             ])
-        if self.data_augmentation and self.model_name != "3dcnn" and self.model_name != "inception":
-            train_transforms += [                
-                transforms.RandomHorizontalFlip(),
-                transforms.RandomRotation(degrees=15),        # Rotate by up to ±15 degrees
-                transforms.RandomResizedCrop((224, 224),      # Random crop and resize to simulate zooming
-                                scale=(0.8, 1.2),  # Scale for zoom in/out
-                                ratio=(0.9, 1.1)),
-                transforms.RandomAffine(degrees=0, shear=10), # Apply random shear with ±10 degrees
-            ]
-        if self.model_name != "3dcnn":
+        if self.model_name != "3dcnn" and self.model_name != "inception":
+            if self.data_augmentation:
+                train_transforms += [                
+                    transforms.RandomHorizontalFlip(),
+                    transforms.RandomRotation(degrees=15),        # Rotate by up to ±15 degrees
+                    transforms.RandomResizedCrop(self.resize_dim,      # Random crop and resize to simulate zooming
+                                    scale=(0.8, 1.2),  # Scale for zoom in/out
+                                    ratio=(0.9, 1.1)),
+                    transforms.RandomAffine(degrees=0, shear=10), # Apply random shear with ±10 degrees
+                ]
             train_transforms = transforms.Compose(train_transforms)
 
         return train_transforms, test_transforms

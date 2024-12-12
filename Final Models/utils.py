@@ -470,7 +470,7 @@ def hash_image(image):
     image_bytes = image.tobytes()  # Convert image to bytes
     return hashlib.sha256(image_bytes).hexdigest()
 
-def find_overlapping_images(train_dataset, test_dataset):
+def find_overlapping_images(train_dataset, test_dataset, logging=True):
     """
     Checks if images in the training dataset overlap with the test dataset.
     Args:
@@ -481,6 +481,7 @@ def find_overlapping_images(train_dataset, test_dataset):
     """
     # Extract and hash all train images
     train_hashes = {}
+    test_indices = []
     for idx, (image, _) in enumerate(train_dataset):
         # Convert to numpy if it's a tensor
         if isinstance(image, torch.Tensor):
@@ -496,10 +497,18 @@ def find_overlapping_images(train_dataset, test_dataset):
         test_hash = hash_image(image)
         if test_hash in train_hashes:
             overlaps.append((train_hashes[test_hash], test_idx))
-
-    print(f"Found {len(overlaps)} overlapping images")
+    if logging:
+        print(f"Found {len(overlaps)} overlapping images")
     for train_idx, test_idx in overlaps:
-        print(f"Train index: {train_idx}, Test index: {test_idx}")
+        if logging:
+            print(f"Train index: {train_idx}, Test index: {test_idx}")
+        test_indices.append(test_idx)
+    return test_indices
+
+def remove_overlapping_images(dataset, overlapping_indices):
+    indices_to_remove = set(overlapping_indices)
+    remaining_indices = [i for i in range(len(dataset)) if i not in indices_to_remove]
+    return torch.utils.data.Subset(dataset, remaining_indices)
 
 class TensorFolderDataset(Dataset):
     def __init__(self, folder_path):
