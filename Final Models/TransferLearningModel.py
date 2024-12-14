@@ -15,7 +15,7 @@ from Unet import UNet
 
 
 class TransferLearningModel(nn.Module):
-    def __init__(self, classes, model_name, device='cuda' if torch.cuda.is_available() else 'cpu', learning_rate=0.001, data_augmentation=False, fine=False, scenario=1):
+    def __init__(self, classes, model_name, device='cuda' if torch.cuda.is_available() else 'cpu', learning_rate=0.001, data_augmentation=False, fine=False, scenario=1, flat=False):
         super(TransferLearningModel, self).__init__()
         self.classes = classes
         self.device = device
@@ -23,6 +23,7 @@ class TransferLearningModel(nn.Module):
         self.data_augmentation = data_augmentation
         self.fine = fine
         self.scenario = scenario
+        self.flat = flat
         self.model = None
         # Initialize the model based on model_name
         if self.model_name == "resnet":
@@ -144,12 +145,17 @@ class TransferLearningModel(nn.Module):
     def train(self, train_loader, val_loader, early_stopping, epochs=5):
         min_val_loss = None
         weight_file_name = f"weights/coarse/scenario{self.scenario}/{self.model_name}.pt"
+        # always new if in the case of overlapping scenarios to always use last scenario
         if self.data_augmentation and not self.fine:
             weight_file_name = f"weights/coarse/scenario{self.scenario}/augmented_{self.model_name}.pt"
         if self.fine and self.data_augmentation:
             weight_file_name = f"weights/fine/augmented_{self.model_name}.pt"
         if self.fine and not self.data_augmentation:
             weight_file_name = f"weights/fine/{self.model_name}.pt"
+        if self.flat and self.data_augmentation:
+            weight_file_name = f"weights/flat/augmented_{self.model_name}.pt"
+        if self.flat and not self.data_augmentation:
+            weight_file_name = f"weights/flat/{self.model_name}.pt"
         self.train_losses = []
         self.val_losses = []
 
