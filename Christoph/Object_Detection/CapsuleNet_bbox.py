@@ -54,36 +54,59 @@ class CapsuleNetwork(nn.Module):
     def forward(self, images):
         primary_caps_output = self.primary_capsules(self.conv_layer(images))
         # squeeze removes dimensions of size 1 and then transpose 0 and 1 dim (10,20,1,1,16)-->(20,10,16)
-        caps_output = self.digit_capsules(primary_caps_output).squeeze().transpose(0,1)
-        reconstructions, y, bbox_output = self.decoder(caps_output)
+        unsqueezed_caps_output, u_hat = self.digit_capsules(primary_caps_output)
+        caps_output = unsqueezed_caps_output.squeeze().transpose(0,1)
+        reconstructions, y, bbox_output = self.decoder(caps_output, u_hat)
         return caps_output, reconstructions, y, bbox_output
     
     def train_model(self, train_loader, criterion, optimizer, n_epochs, print_every=300):
         losses = []
         for epoch in range(1, n_epochs+1):
             train_loss = 0.0
-            bbloss = 0.0
             self.train()
             for batch_i, (images, target, bboxes) in enumerate(train_loader):
                 target = torch.eye(self.num_classes).index_select(dim=0, index=target)
+                bboxes = torch.stack([torch.stack(b) for b in zip(*bboxes)], dim=0) 
+                bboxes.float()
                 if self.train_on_gpu:
-                    images, target, bboxes = images.cuda(), target.cuda(), bboxes()
+                    images, target, bboxes = images.cuda(), target.cuda(), bboxes.cuda()
                 optimizer.zero_grad()
                 caps_output, reconstructions, y, bbox_pred = self.forward(images)
+                loss = criterion(caps_output, target, images, reconstructions)
                 img_loss = criterion(caps_output, target, images, reconstructions)
-                bbox_loss = F.mse_loss(bbox_pred, bboxes)
-                loss=img_loss+bbox_loss
+                # bbox_loss = F.mse_loss(bbox_pred.float(), bboxes.float())
+                 # Erstelle eine Maske für gültige Bounding Boxen (z.B. überall, wo bboxes != -1)
+                valid_bboxes_mask = (bboxes != -1).all(dim=1)  # Maske für gültige Bounding Boxes, achte darauf, dass alle Koordinaten != -1 sind
+                
+                # Berechne den Bounding Box Loss nur für die gültigen Beispiele
+                valid_bbox_pred = bbox_pred[valid_bboxes_mask]
+                valid_bboxes = bboxes[valid_bboxes_mask]
+
+                # Nur MSE Loss für gültige Bounding Boxes
+                # bbox_loss = 0
+                if valid_bbox_pred.shape[0] > 0:  # Wenn es gültige Beispiele gibt
+                    bbox_loss = F.mse_loss(valid_bbox_pred.float(), valid_bboxes.float())
+                    bbox_loss = bbox_loss / (valid_bbox_pred.size(0) * 4)  # Normalisierung für die Anzahl der BBox-Koordinaten
+                
+                # print("Bounding Box Predicted:", bbox_pred)
+                # print("Bounding Box True:", bboxes)
+                loss=(img_loss+bbox_loss).float()
+                # print("loss Datentyp:", loss.dtype)
+                # print("loss:", loss)
                 loss.backward()
                 optimizer.step()
                 train_loss += loss.item()
-                bbloss += bbox_loss.item()
+                # bbloss += bbox_loss.item()
 
                 if batch_i != 0 and batch_i % print_every == 0:
                     avg_train_loss = train_loss/print_every
-                    avg_bbox_loss = bbloss/print_every
+                    # avg_bbox_loss = bbloss/print_every
                     losses.append(avg_train_loss)
-                    print('Epoch: {} \tTraining Loss: {:.8f}\tBBox Loss: {:.8f}'.format(epoch, avg_train_loss, avg_bbox_loss))
+                    print('Epoch: {} \tTraining Loss: {:.8f}'.format(epoch, avg_train_loss))
                     train_loss = 0 # reset accumulated training loss
+                    # bbloss = 0
+            torch.cuda.empty_cache()  # Für GPU
+            del loss, img_loss, bbox_loss
         return losses
     
     def display_confusion_matrix(self, true_labels, pred_labels):
@@ -112,7 +135,7 @@ class CapsuleNetwork(nn.Module):
         test_loss = 0
         self.eval()
 
-        for batch_i, (images, target) in enumerate(test_loader):
+        for batch_i, (images, target, bboxes) in enumerate(test_loader):
             target = torch.eye(self.num_classes).index_select(dim=0, index=target)
             batch_size = images.size(0)
             if self.train_on_gpu:
@@ -214,13 +237,14 @@ class DigitCaps(nn.Module):
         # getting the correct size of b_ij
         # setting them all to 0, initially
         b_ij = torch.zeros(*u_hat.size())
+        
         # moving b_ij to GPU, if available
         if self.train_on_gpu:
             b_ij = b_ij.cuda()
 
         # update coupling coefficients and calculate v_j
         v_j = dynamic_routing(b_ij, u_hat, self.squash, routing_iterations=3)
-        return v_j # return final vector outputs
+        return v_j, u_hat # return final vector outputs
     
     
     def squash(self, input_tensor):
@@ -248,17 +272,19 @@ class Decoder(nn.Module):
         )
 
         self.linear_boxes_layers = nn.Sequential(
-            nn.Linear(4, 16),  # Eingabegröße der Bounding Box-Koordinaten
+            nn.Linear(32768, 1024),  # Progressivere Reduktion
             nn.ReLU(inplace=True),
-            nn.Linear(16, 16),
+            nn.Linear(1024, 256),
             nn.ReLU(inplace=True),
-            nn.Linear(16, 4),  # Ausgabe von x_min, y_min, x_max, y_max
-            nn.Sigmoid()       # Werte im Bereich [0, 1]
+            nn.Linear(256, 64),
+            nn.ReLU(inplace=True),
+            nn.Linear(64, 4),       # Ausgabe: [x_min, y_min, x_max, y_max]
+            nn.Sigmoid()            # Beschränkung auf Werte [0, 1]
         )
         self.num_classes = num_classes
         self.train_on_gpu = train_on_gpu
 
-    def forward(self, x, has_bbox=None):
+    def forward(self, x, u_hat):
         # x shape (20,10,16)
         # x**2 shape -> (20,10,16)
         # sum(dim-1) --> shape (20,10)
@@ -272,15 +298,20 @@ class Decoder(nn.Module):
         sparse_matrix = torch.eye(self.num_classes)
         if self.train_on_gpu:
             sparse_matrix = sparse_matrix.cuda()
+    
+
+
         # One-Hot-Encoding of the classes
         y = sparse_matrix.index_select(dim=0, index=max_length_indices.data)
         x = x * y[:, :, None] # (20,10,16) * (20,10,1)
         # flat x --> (20,160) 10*16
         flattened_x = x.contiguous().view(x.size(0), -1)
-        if has_bbox is not None and has_bbox.any():
-            bbox_output = self.linear_boxes_layers(flattened_x[has_bbox])
-        else:
-            bbox_output = None
+        u_hat_shaped = u_hat[0, :, :, 0, :]  # Select the first batch, all elements in dimensions 1, 2, and 4
+        # u_hat_shaped = u_hat.view(u_hat.shape[1], u_hat.shape[2], u_hat.shape[4])
+        u_hat_avg = u_hat_shaped.mean(dim=-1)
+        bbox_output = self.linear_boxes_layers(u_hat_avg)
+        bbox_output = bbox_output.float()
+        
         reconstructions = self.linear_layers(flattened_x)
         # y = one hot encoded labels
         return reconstructions, y, bbox_output
