@@ -153,9 +153,9 @@ class TransferLearningModel(nn.Module):
         if self.fine and not self.data_augmentation:
             weight_file_name = f"weights/fine/{self.model_name}.pt"
         if self.flat and self.data_augmentation:
-            weight_file_name = f"weights/flat/augmented_{self.model_name}.pt"
+            weight_file_name = f"weights/flat/scenario{self.scenario}/augmented_{self.model_name}.pt"
         if self.flat and not self.data_augmentation:
-            weight_file_name = f"weights/flat/{self.model_name}.pt"
+            weight_file_name = f"weights/flat/scenario{self.scenario}/{self.model_name}.pt"
         self.train_losses = []
         self.val_losses = []
 
