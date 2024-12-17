@@ -102,7 +102,7 @@ class DICOMCoarseDataset(Dataset):
         img_path = self.image_paths[index]
         dicom_image = pydicom.dcmread(img_path)
         image = dicom_image.pixel_array
-        image = Image.fromarray(np.uint8(image))
+        # image = Image.fromarray(np.uint8(image))
         if self.transform:
             image = self.transform(image)
         label = self.labels[index]
