@@ -171,6 +171,8 @@ class CapsuleNetwork(nn.Module):
         return caps_output, images, reconstructions
 
 class ConvLayer(nn.Module):
+
+    
     def __init__(self, in_channels, out_channels, kernel_size, stride, padding):
         super(ConvLayer, self).__init__()
         self.conv = nn.Conv2d(in_channels, out_channels, kernel_size, stride, padding)
@@ -179,25 +181,40 @@ class ConvLayer(nn.Module):
         # new_image_size = ((input_size - kernel + 2*padding) / stride) + 1 f.e. ((280 - 9)/1)+1 = 272
         # (batch_size, out_channels, 
         features = F.relu(self.conv(x))
+        print(f"feature shape {features.shape}")
         return features
     
 class PrimaryCaps(nn.Module):
     # out channels is in channels divided by number of capsules
     def __init__(self, num_capsules, in_channels, out_channels, kernel_size, stride, padding):
         super(PrimaryCaps, self).__init__()
+        
         self.out_channels = out_channels
         self.capsules = nn.ModuleList([nn.Conv2d(in_channels, out_channels, kernel_size, stride, padding) for _ in range(num_capsules)])
+        print(f"Initializing PrimeCaps with: in_channels={in_channels}, out_channels={out_channels}, "
+              f", kernel_size={kernel_size}, stride={stride}, padding={padding}, "
+              f"num_capsules={num_capsules}")
 
     def forward(self, x):
+        print(f"Input shape to PrimeCaps: {x.shape}") 
         batch_size = x.size(0)
+        print(f"Input size to Batchsize: {batch_size}")  
         u = [capsule(x).view(batch_size, self.out_channels * capsule(x).shape[2] * capsule(x).shape[2], 1) for capsule in self.capsules]
         u = torch.cat(u, dim=-1)
         u_squash = self.squash(u)
+        print(f"Output Prime:{u_squash.shape}")
         return u_squash
     
     def squash(self, input_tensor):
+        # Berechnung der quadratischen Norm (Summe der Quadrate aller Werte entlang der letzten Dimension)
         squared_norm = (input_tensor ** 2).sum(dim=-1, keepdim=True)
+        # Berechnung des Skalierungsfaktors, basierend auf der quadratischen Norm
+        # Hier wird die Formel squashing = squared_norm / (1 + squared_norm) verwendet.
+        # Das sorgt dafür, dass die Werte der Kapseln in einem Bereich von 0 bis 1 bleiben.
         scale = squared_norm / (1+squared_norm)
+            # Anwendung der Squashing-Formel auf den Input:
+        # 1. Der Vektor wird normalisiert, indem er durch die Quadratwurzel der Norm geteilt wird.
+        # 2. Der normalisierte Vektor wird mit dem Skalierungsfaktor multipliziert, um die Ausgabe zu "squashen".
         output_tensor = scale * input_tensor / torch.sqrt(squared_norm)
         return output_tensor
     
@@ -216,22 +233,32 @@ class DigitCaps(nn.Module):
         # self.previous_layer_nodes = previous_layer_nodes # vector input (dim=1152)
         self.in_channels = in_channels # previous layer's number of capsules
         self.out_channels = out_channels
+        self.previous_out_channels=previous_out_channels
+        self.cropped_size=cropped_size
+
         # starting out with a randomly initialized weight matrix, W
         # these will be the weights connecting the PrimaryCaps and DigitCaps layers
         self.train_on_gpu = train_on_gpu
+
+        
         self.W = nn.Parameter(torch.randn((self.num_capsules, previous_out_channels*cropped_size*cropped_size, 
                                     self.in_channels, self.out_channels)))
-
+        
+        print(f"Initializing DigitCaps with: in_channels={in_channels}, out_channels={out_channels}, "
+              f"num_classes={self.num_capsules}, previous_out_channels={previous_out_channels}, cropped_size={cropped_size}")
     def forward(self, u):
         '''Defines the feedforward behavior.
            param u: the input; vectors from the previous PrimaryCaps layer
            return: a set of normalized, capsule output vectors
            '''
+        print(f"Initializing DigitCaps with: in_channels={self.in_channels}, out_channels={self.out_channels}, "
+              f"num_classes={self.num_capsules}, previous_out_channels={self.previous_out_channels}, cropped_size={self.cropped_size}")
+        print(f"shape of u{u.shape}")
         # adding batch_size dims and stacking all u vectors
         u = u[None, :, :, None, :] # doppelpunkt nimmt die dimension aus original, none added eine dimension mit länge 1
         # 4D weight matrix
         W = self.W[:, None, :, :, :]
-        
+        print(f"W={W.shape}")
         # calculating u_hat = W*u
         u_hat = torch.matmul(u, W)
         # getting the correct size of b_ij
@@ -245,6 +272,7 @@ class DigitCaps(nn.Module):
         # update coupling coefficients and calculate v_j
         v_j = dynamic_routing(b_ij, u_hat, self.squash, routing_iterations=3)
         return v_j, u_hat # return final vector outputs
+    
     
     
     def squash(self, input_tensor):
