@@ -81,10 +81,7 @@ class DICOMCoarseDataset(Dataset):
                     else:
                         # Indicate no bounding box for this image
                         bbox_data = {
-                            'xmin': -1,
-                            'ymin': -1,
-                            'xmax': -1,
-                            'ymax': -1
+
                         }
 
                     # Full file path.

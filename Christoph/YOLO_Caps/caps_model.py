@@ -54,60 +54,183 @@ class CapsuleNetwork(nn.Module):
     def forward(self, images):
         primary_caps_output = self.primary_capsules(self.conv_layer(images))
         # squeeze removes dimensions of size 1 and then transpose 0 and 1 dim (10,20,1,1,16)-->(20,10,16)
-        unsqueezed_caps_output, u_hat = self.digit_capsules(primary_caps_output)
-        caps_output = unsqueezed_caps_output.squeeze().transpose(0,1)
-        reconstructions, y, bbox_output = self.decoder(caps_output, u_hat)
-        return caps_output, reconstructions, y, bbox_output
-    
-    def train_model(self, train_loader, criterion, optimizer, n_epochs, print_every=300):
+        caps_output = self.digit_capsules(primary_caps_output).squeeze().transpose(0,1)
+        reconstructions, y = self.decoder(caps_output)
+        return caps_output, reconstructions, y
+    def train_model(self, train_loader, val_loader, criterion, optimizer, n_epochs, early_stopping, print_every=1):
+        # Liste zum Speichern der Verluste während des Trainings
         losses = []
-        for epoch in range(1, n_epochs+1):
-            train_loss = 0.0
-            self.train()
-            for batch_i, (images, target, bboxes) in enumerate(train_loader):
+        self.train_losses = []  # Liste für die Trainingsverluste pro Epoche
+        self.val_losses = []  # Liste für die Validierungsverluste pro Epoche
+        min_val_loss = None  # Variable für den minimalen Validierungsverlust, um die besten Gewichte zu speichern
+        weight_file_name = "weights/caps/caps_crop.pt"  # Der Pfad, unter dem die Modellgewichte gespeichert werden
+
+        # Training über n_epochs Epochen
+        for epoch in range(1, n_epochs + 1):
+            train_loss = 0.0  # Akkumulierte Trainingsverlust der aktuellen Epoche
+            total_correct = 0  # Anzahl der korrekt klassifizierten Bilder
+            total = 0  # Gesamtzahl der Bilder in der aktuellen Epoche
+            
+
+            # Schleife über alle Batches im Trainings-Loader
+            for batch_i, (images, target) in enumerate(train_loader):
+                batch_size = images.size(0)
+                # Ziel (target) in One-Hot-Encoding umwandeln
                 target = torch.eye(self.num_classes).index_select(dim=0, index=target)
-                bboxes = torch.stack([torch.stack(b) for b in zip(*bboxes)], dim=0) 
-                bboxes.float()
                 if self.train_on_gpu:
-                    images, target, bboxes = images.cuda(), target.cuda(), bboxes.cuda()
-                optimizer.zero_grad()
-                caps_output, reconstructions, y, bbox_pred = self.forward(images)
+                    # Falls Training auf der GPU, dann Bilder und Targets auf die GPU verschieben
+                    images, target = images.cuda(), target.cuda()
+
+                optimizer.zero_grad()  # Setzt den Gradienten des Optimizers auf Null
+                # Vorwärtsdurchlauf durch das Modell
+                caps_output, reconstructions, y = self.forward(images)
+                
+                # Berechnung des Verlusts
                 loss = criterion(caps_output, target, images, reconstructions)
-                img_loss = criterion(caps_output, target, images, reconstructions)
-                # bbox_loss = F.mse_loss(bbox_pred.float(), bboxes.float())
-                 # Erstelle eine Maske für gültige Bounding Boxen (z.B. überall, wo bboxes != -1)
-                valid_bboxes_mask = (bboxes != -1).all(dim=1)  # Maske für gültige Bounding Boxes, achte darauf, dass alle Koordinaten != -1 sind
-                
-                # Berechne den Bounding Box Loss nur für die gültigen Beispiele
-                valid_bbox_pred = bbox_pred[valid_bboxes_mask]
-                valid_bboxes = bboxes[valid_bboxes_mask]
+                loss.backward()  # Berechnung der Gradienten
+                optimizer.step()  # Schritt des Optimizers, um die Gewichte zu aktualisieren
 
-                # Nur MSE Loss für gültige Bounding Boxes
-                # bbox_loss = 0
-                if valid_bbox_pred.shape[0] > 0:  # Wenn es gültige Beispiele gibt
-                    bbox_loss = F.mse_loss(valid_bbox_pred.float(), valid_bboxes.float())
-                    bbox_loss = bbox_loss / (valid_bbox_pred.size(0) * 4)  # Normalisierung für die Anzahl der BBox-Koordinaten
+                train_loss += loss.item()  # Akkumulieren des Verlusts
+                _, pred = torch.max(y.data.cpu(), 1)
+                _, target_shape = torch.max(target.data.cpu(), 1)
+                # correct += np.squeeze(pred.eq(target_shape.data.view_as(pred)))
+                total += target.size(0)  # Anzahl der Bilder in diesem Batch
+                # print(f"total: {total}")
+               
+                total_correct += pred.eq(target_shape).sum().item()  # Anzahl der korrekt klassifizierten Beispiele
+                # print(f"correct pred {total_correct}")
+            # Sobald das angegebene print_every Intervall erreicht wird, den Durchschnittsverlust berechnen
+            avg_train_loss = train_loss / len(train_loader)  # Durchschnitt pro Epoche
+            losses.append(avg_train_loss)  # Speichern des Durchschnittsverlusts
+            self.train_losses.append(avg_train_loss)  # Speichern des Durchschnittsverlusts für späteres Plotten
                 
-                # print("Bounding Box Predicted:", bbox_pred)
-                # print("Bounding Box True:", bboxes)
-                loss=(img_loss+bbox_loss).float()
-                # print("loss Datentyp:", loss.dtype)
-                # print("loss:", loss)
-                loss.backward()
-                optimizer.step()
-                train_loss += loss.item()
-                # bbloss += bbox_loss.item()
+            train_accuracy = 100 * total_correct / total
 
-                if batch_i != 0 and batch_i % print_every == 0:
-                    avg_train_loss = train_loss/print_every
-                    # avg_bbox_loss = bbloss/print_every
-                    losses.append(avg_train_loss)
-                    print('Epoch: {} \tTraining Loss: {:.8f}'.format(epoch, avg_train_loss))
-                    train_loss = 0 # reset accumulated training loss
-                    # bbloss = 0
-            torch.cuda.empty_cache()  # Für GPU
-            del loss, img_loss, bbox_loss
-        return losses
+            # Modell in den Evaluierungsmodus setzen für die Validierung
+            
+            val_running_loss = 0.0  # Akkumulierter Verlust während der Validierung
+            val_correct = 0  # Anzahl der korrekt klassifizierten Validierungsbilder
+            val_total = 0  # Gesamtanzahl der Validierungsbilder
+
+            # Keine Gradientenberechnung während der Validierung
+            with torch.no_grad():
+                # Schleife über alle Batches im Validierungs-Loader
+                for inputs, labels in val_loader:
+                    inputs, labels = inputs.to(self.device), labels.to(self.device)  # Verschieben auf die GPU
+                    outputs = self.model(inputs)  # Vorwärtsdurchlauf durch das Modell
+                    val_loss = self.criterion(outputs, labels)  # Berechnung des Validierungsverlusts
+                    val_running_loss += val_loss.item() * inputs.size(0)  # Akkumulieren des Verlusts
+                    _, val_predicted = outputs.max(1)  # Vorhersage der Klasse
+                    val_total += labels.size(0)  # Anzahl der Validierungsbilder
+                    val_correct += val_predicted.eq(labels).sum().item()  # Anzahl der richtigen Vorhersagen
+
+            # Durchschnittlicher Validierungsverlust und Genauigkeit berechnen
+            val_epoch_loss = val_running_loss / len(val_loader.dataset)
+            val_epoch_acc = 100 * val_correct / val_total
+            self.val_losses.append(val_epoch_loss)  # Speichern des Verlusts in der Liste
+
+            # Ausgabe der Ergebnisse für diese Epoche
+            print(f"Epoch {epoch}/{n_epochs} ----- "
+                f"Loss: {avg_train_loss:.4f}, Accuracy: {train_accuracy:.2f}% ----- "
+                f"Validation Loss: {val_epoch_loss:.4f}, Validation Accuracy: {val_epoch_acc:.2f}%")
+
+            # Wenn der aktuelle Validierungsverlust besser ist als der bisher beste, speichere das Modell
+            # Speichern der besten Modellgewichte basierend auf dem minimalen Validierungsverlust
+            if min_val_loss is None or val_epoch_loss < min_val_loss:
+                min_val_loss = val_epoch_loss
+                checkpoint = {
+                    'model_state_dict': self.model.state_dict(),
+                    'loss': val_epoch_loss
+                }
+                torch.save(checkpoint, weight_file_name)
+
+            early_stopping(val_epoch_loss)
+            if early_stopping.early_stop:
+                print("Early stopping triggered")
+                break
+        
+
+        # Verlust-Diagramm speichern
+        loss_plot_path = weight_file_name.replace('.pt', '_loss_plot.png')
+        self.plot_loss(save_path=loss_plot_path)  # Plot-Funktion für den Verlust
+
+        return losses  # Rückgabe der gesammelten Verluste
+
+
+    # def train_model(self, train_loader, val_loader, criterion, optimizer, n_epochs, early_stopping, print_every=1):
+    #     losses = []
+    #     self.train_losses = []
+    #     self.val_losses = []
+    #     min_val_loss=None
+    #     weight_file_name = "weights/caps/caps_crop.pt"
+    #     for epoch in range(1, n_epochs+1):
+    #         train_loss = 0.0
+    #         correct = 0
+    #         total = 0 
+    #         self.train()
+    #         for batch_i, (images, target) in enumerate(train_loader):
+    #             target = torch.eye(self.num_classes).index_select(dim=0, index=target)
+    #             if self.train_on_gpu:
+    #                 images, target = images.cuda(), target.cuda()
+    #             optimizer.zero_grad()
+    #             caps_output, reconstructions, y = self.forward(images)
+    #             loss = criterion(caps_output, target, images, reconstructions)
+    #             loss.backward()
+    #             optimizer.step()
+    #             train_loss += loss.item()
+
+    #             total += target.size(0)
+    #             correct += caps_output.eq(target).sum().item()
+    #             epoch_acc = 100 * correct / total
+    #             self.train_losses.append(avg_train_loss)
+            
+
+    #             if batch_i != 0 and batch_i % print_every == 0:
+    #                 avg_train_loss = train_loss/print_every
+    #                 losses.append(avg_train_loss)
+    #                 train_loss = 0
+
+    #         epoch_acc = 100 * correct / total
+
+    #         self.model.eval()
+
+    #         val_running_loss = 0.0
+    #         val_correct = 0
+    #         val_total = 0
+
+    #         with torch.no_grad():
+    #             for inputs, labels in val_loader:
+    #                 inputs, labels = inputs.to(self.device), labels.to(self.device)
+    #                 outputs = self.model(inputs)
+    #                 val_loss = self.criterion(outputs, labels)
+    #                 val_running_loss += val_loss.item() * inputs.size(0)
+    #                 _, val_predicted = outputs.max(1)
+    #                 val_total += labels.size(0)
+    #                 val_correct += val_predicted.eq(labels).sum().item()
+
+    #         val_epoch_loss = val_running_loss / len(val_loader.dataset)
+    #         val_epoch_acc = 100 * val_correct / val_total
+    #         self.val_losses.append(val_epoch_loss)
+    #         print(f"Epoch {epoch+1}/{n_epochs+1} ----- Loss: {avg_train_loss:.4f}, Accuracy: {epoch_acc:.2f}% ----- Validation Loss: {val_epoch_loss:.4f}, Validation Accuracy: {val_epoch_acc:.2f}%")
+
+    #         if min_val_loss == None or val_epoch_loss < min_val_loss:
+    #             min_val_loss = val_epoch_loss
+    #             checkpoint = {
+    #                 'model_state_dict': self.model.state_dict(),
+    #                 'loss': val_epoch_loss
+    #             }
+    #             torch.save(checkpoint, weight_file_name)
+    #         self.scheduler.step(val_epoch_loss)
+    #         early_stopping(val_epoch_loss)
+    #         if early_stopping.early_stop:
+    #             print("Early stopping triggered")
+    #             break
+    #     loss_plot_path = weight_file_name.replace('.pt', '_loss_plot.png')
+    #     self.plot_loss(save_path=loss_plot_path)   
+
+    #                 # print('Epoch: {} \tTraining Loss: {:.8f}'.format(epoch, avg_train_loss))
+    #              # reset accumulated training loss
+    #     return losses
     
     def display_confusion_matrix(self, true_labels, pred_labels):
         cm = confusion_matrix(true_labels, pred_labels)
@@ -135,7 +258,7 @@ class CapsuleNetwork(nn.Module):
         test_loss = 0
         self.eval()
 
-        for batch_i, (images, target, bboxes) in enumerate(test_loader):
+        for batch_i, (images, target) in enumerate(test_loader):
             target = torch.eye(self.num_classes).index_select(dim=0, index=target)
             batch_size = images.size(0)
             if self.train_on_gpu:
@@ -171,8 +294,6 @@ class CapsuleNetwork(nn.Module):
         return caps_output, images, reconstructions
 
 class ConvLayer(nn.Module):
-
-    
     def __init__(self, in_channels, out_channels, kernel_size, stride, padding):
         super(ConvLayer, self).__init__()
         self.conv = nn.Conv2d(in_channels, out_channels, kernel_size, stride, padding)
@@ -181,40 +302,25 @@ class ConvLayer(nn.Module):
         # new_image_size = ((input_size - kernel + 2*padding) / stride) + 1 f.e. ((280 - 9)/1)+1 = 272
         # (batch_size, out_channels, 
         features = F.relu(self.conv(x))
-        print(f"feature shape {features.shape}")
         return features
     
 class PrimaryCaps(nn.Module):
     # out channels is in channels divided by number of capsules
     def __init__(self, num_capsules, in_channels, out_channels, kernel_size, stride, padding):
         super(PrimaryCaps, self).__init__()
-        
         self.out_channels = out_channels
         self.capsules = nn.ModuleList([nn.Conv2d(in_channels, out_channels, kernel_size, stride, padding) for _ in range(num_capsules)])
-        print(f"Initializing PrimeCaps with: in_channels={in_channels}, out_channels={out_channels}, "
-              f", kernel_size={kernel_size}, stride={stride}, padding={padding}, "
-              f"num_capsules={num_capsules}")
 
     def forward(self, x):
-        print(f"Input shape to PrimeCaps: {x.shape}") 
         batch_size = x.size(0)
-        print(f"Input size to Batchsize: {batch_size}")  
         u = [capsule(x).view(batch_size, self.out_channels * capsule(x).shape[2] * capsule(x).shape[2], 1) for capsule in self.capsules]
         u = torch.cat(u, dim=-1)
         u_squash = self.squash(u)
-        print(f"Output Prime:{u_squash.shape}")
         return u_squash
     
     def squash(self, input_tensor):
-        # Berechnung der quadratischen Norm (Summe der Quadrate aller Werte entlang der letzten Dimension)
         squared_norm = (input_tensor ** 2).sum(dim=-1, keepdim=True)
-        # Berechnung des Skalierungsfaktors, basierend auf der quadratischen Norm
-        # Hier wird die Formel squashing = squared_norm / (1 + squared_norm) verwendet.
-        # Das sorgt dafür, dass die Werte der Kapseln in einem Bereich von 0 bis 1 bleiben.
         scale = squared_norm / (1+squared_norm)
-            # Anwendung der Squashing-Formel auf den Input:
-        # 1. Der Vektor wird normalisiert, indem er durch die Quadratwurzel der Norm geteilt wird.
-        # 2. Der normalisierte Vektor wird mit dem Skalierungsfaktor multipliziert, um die Ausgabe zu "squashen".
         output_tensor = scale * input_tensor / torch.sqrt(squared_norm)
         return output_tensor
     
@@ -233,47 +339,34 @@ class DigitCaps(nn.Module):
         # self.previous_layer_nodes = previous_layer_nodes # vector input (dim=1152)
         self.in_channels = in_channels # previous layer's number of capsules
         self.out_channels = out_channels
-        self.previous_out_channels=previous_out_channels
-        self.cropped_size=cropped_size
-
         # starting out with a randomly initialized weight matrix, W
         # these will be the weights connecting the PrimaryCaps and DigitCaps layers
         self.train_on_gpu = train_on_gpu
-
-        
         self.W = nn.Parameter(torch.randn((self.num_capsules, previous_out_channels*cropped_size*cropped_size, 
                                     self.in_channels, self.out_channels)))
-        
-        print(f"Initializing DigitCaps with: in_channels={in_channels}, out_channels={out_channels}, "
-              f"num_classes={self.num_capsules}, previous_out_channels={previous_out_channels}, cropped_size={cropped_size}")
+
     def forward(self, u):
         '''Defines the feedforward behavior.
            param u: the input; vectors from the previous PrimaryCaps layer
            return: a set of normalized, capsule output vectors
            '''
-        print(f"Initializing DigitCaps with: in_channels={self.in_channels}, out_channels={self.out_channels}, "
-              f"num_classes={self.num_capsules}, previous_out_channels={self.previous_out_channels}, cropped_size={self.cropped_size}")
-        print(f"shape of u{u.shape}")
         # adding batch_size dims and stacking all u vectors
         u = u[None, :, :, None, :] # doppelpunkt nimmt die dimension aus original, none added eine dimension mit länge 1
         # 4D weight matrix
         W = self.W[:, None, :, :, :]
-        print(f"W={W.shape}")
+        
         # calculating u_hat = W*u
         u_hat = torch.matmul(u, W)
         # getting the correct size of b_ij
         # setting them all to 0, initially
         b_ij = torch.zeros(*u_hat.size())
-        
         # moving b_ij to GPU, if available
         if self.train_on_gpu:
             b_ij = b_ij.cuda()
 
         # update coupling coefficients and calculate v_j
         v_j = dynamic_routing(b_ij, u_hat, self.squash, routing_iterations=3)
-        print(f"Digitscaps Output : {v_j.shape}")
-        return v_j, u_hat # return final vector outputs
-    
+        return v_j # return final vector outputs
     
     
     def squash(self, input_tensor):
@@ -299,21 +392,10 @@ class Decoder(nn.Module):
             nn.Linear(hidden_dim*2, image_size ** 2),
             nn.Sigmoid()
         )
-
-        self.linear_boxes_layers = nn.Sequential(
-            nn.Linear(32768, 1024),  # Progressivere Reduktion
-            nn.ReLU(inplace=True),
-            nn.Linear(1024, 256),
-            nn.ReLU(inplace=True),
-            nn.Linear(256, 64),
-            nn.ReLU(inplace=True),
-            nn.Linear(64, 4),       # Ausgabe: [x_min, y_min, x_max, y_max]
-            nn.Sigmoid()            # Beschränkung auf Werte [0, 1]
-        )
         self.num_classes = num_classes
         self.train_on_gpu = train_on_gpu
 
-    def forward(self, x, u_hat):
+    def forward(self, x):
         # x shape (20,10,16)
         # x**2 shape -> (20,10,16)
         # sum(dim-1) --> shape (20,10)
@@ -327,23 +409,14 @@ class Decoder(nn.Module):
         sparse_matrix = torch.eye(self.num_classes)
         if self.train_on_gpu:
             sparse_matrix = sparse_matrix.cuda()
-    
-
-
         # One-Hot-Encoding of the classes
         y = sparse_matrix.index_select(dim=0, index=max_length_indices.data)
         x = x * y[:, :, None] # (20,10,16) * (20,10,1)
         # flat x --> (20,160) 10*16
         flattened_x = x.contiguous().view(x.size(0), -1)
-        u_hat_shaped = u_hat[0, :, :, 0, :]  # Select the first batch, all elements in dimensions 1, 2, and 4
-        # u_hat_shaped = u_hat.view(u_hat.shape[1], u_hat.shape[2], u_hat.shape[4])
-        u_hat_avg = u_hat_shaped.mean(dim=-1)
-        bbox_output = self.linear_boxes_layers(u_hat_avg)
-        bbox_output = bbox_output.float()
-        
         reconstructions = self.linear_layers(flattened_x)
         # y = one hot encoded labels
-        return reconstructions, y, bbox_output
+        return reconstructions, y
     
 class CapsuleLoss(nn.Module):
     def __init__(self, learning_rate=5e-04):
