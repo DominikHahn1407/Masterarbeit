@@ -272,6 +272,55 @@ class TransferLearningModel(nn.Module):
         plt.title("Confusion Matrix")
         plt.show()
     
+    def evaluate_final(self, test_loader, save_dir=None):
+        self.model.eval()
+        correct = 0
+        total = 0
+        running_loss = 0.0
+        input_list = []
+        true_labels = []
+        true_labels_fine = []
+        pred_labels = []
+        
+        with torch.no_grad():
+            for inputs, labels, labels_fine in test_loader:
+                inputs, labels, labels_fine = inputs.to(self.device), labels.to(self.device), labels_fine.to(self.device)
+                
+                # Forward pass
+                outputs = self.model(inputs)
+                loss = self.criterion(outputs, labels)
+                
+                # Statistics
+                running_loss += loss.item() * inputs.size(0)
+                _, predicted = outputs.max(1)
+                total += labels.size(0)
+                correct += predicted.eq(labels).sum().item()
+
+                true_labels.extend(labels.cpu().numpy())
+                true_labels_fine.extend(labels_fine.cpu().numpy())
+                pred_labels.extend(predicted.cpu().numpy())
+                input_list.extend(inputs)
+
+        avg_loss = running_loss / len(test_loader.dataset)
+        accuracy = 100 * correct / total
+        cm = confusion_matrix(true_labels, pred_labels)
+        if save_dir is not None:
+            for i in range(len(true_labels)):
+                if true_labels[i] == 0 and pred_labels[i] == 0:
+                    save_path = os.path.join(save_dir, f"tensor_{i}_label_coarse_{true_labels[i]}_label_fine_{true_labels_fine[i]}.pt")
+                    torch.save({
+                        "image": input_list[i],
+                        "label": true_labels[i],
+                        "label_fine": true_labels_fine[i]
+                    }, save_path)
+        disp = ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=self.classes)
+        print(f"Evaluation Accuracy on unseen data: {accuracy}")
+        # Plot confusion matrix
+        plt.figure(figsize=(10, 8))
+        disp.plot(cmap=plt.cm.Reds, values_format='d')
+        plt.title("Confusion Matrix")
+        plt.show()
+    
     def predict(self, inputs):
         self.model.eval()
         inputs = inputs.to(self.device)

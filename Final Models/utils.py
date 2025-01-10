@@ -11,6 +11,7 @@ from collections import Counter
 import torch.utils
 from torch.utils.data import Dataset
 import torch.utils.data
+from torchvision.transforms import ToPILImage
 
 
 class DICOMCoarseDataset(Dataset):
@@ -331,7 +332,6 @@ class TransformDataset(torch.utils.data.Dataset):
     def __len__(self):
         return len(self.base_dataset)
     
-
 class TransformDatasetBalanced(torch.utils.data.Dataset):
     def __init__(self, base_dataset, classes, transform=None, balance=True):
         self.base_dataset = base_dataset
@@ -549,8 +549,8 @@ class TensorFolderDataset(Dataset):
     def __getitem__(self, idx):
         file_path = os.path.join(self.folder_path, self.file_list[idx])
         data = torch.load(file_path)
-        return data['image'], data['label']                                  
-    
+        return data['image'], data['label']   
+   
 class DICOMFlatDataset(Dataset):
     def __init__(self, root_dir, classes, transform=None, scenario=1, balance_n=True):
         random.seed(41)
@@ -630,3 +630,65 @@ class DICOMFlatDataset(Dataset):
             axes[i].set_title(f"Label: {list(self.classes.keys())[label]}")
             axes[i].axis("off")
         plt.show()
+
+class TensorFolderDatasetFinal(Dataset):
+    def __init__(self, folder_path):
+        self.folder_path = folder_path
+        self.file_list = [f for f in os.listdir(folder_path) if f.endswith('.pt')]
+
+    def __len__(self):
+        return len(self.file_list)
+    
+    def __getitem__(self, idx):
+        label_fine = None
+        file_path = os.path.join(self.folder_path, self.file_list[idx])
+        data = torch.load(file_path)
+        if "label_fine" in data:
+            label_fine = data['label_fine']
+        else:
+            label_fine = 0
+        return data['image'], data['label'], label_fine
+    
+class TransformDatasetFinal(torch.utils.data.Dataset):
+    def __init__(self, base_dataset, transform=None):
+        self.base_dataset = base_dataset
+        self.transform = transform
+
+    def __getitem__(self, index):
+        sample, label, label_fine = self.base_dataset[index]
+        if self.transform:
+            sample = self.transform(sample)
+        return sample, label, label_fine
+
+    def __len__(self):
+        return len(self.base_dataset)
+    
+class TensorFolderDatasetFinalFlat(Dataset):
+    def __init__(self, folder_path):
+        self.folder_path = folder_path
+        self.file_list = [f for f in os.listdir(folder_path) if f.endswith('.pt')]
+
+    def __len__(self):
+        return len(self.file_list)
+    
+    def __getitem__(self, idx):
+        file_path = os.path.join(self.folder_path, self.file_list[idx])
+        data = torch.load(file_path)
+        return data['image'], data['label_fine']
+    
+class TransformDatasetFinalFlat(torch.utils.data.Dataset):
+    def __init__(self, base_dataset, transform=None):
+        self.base_dataset = base_dataset
+        self.transform = transform
+        self.to_pil = ToPILImage()
+
+    def __getitem__(self, index):
+        sample, label_fine = self.base_dataset[index]
+        if isinstance(sample, torch.Tensor):
+            sample = self.to_pil(sample)
+        if self.transform:
+            sample = self.transform(sample)
+        return sample, label_fine
+
+    def __len__(self):
+        return len(self.base_dataset)
