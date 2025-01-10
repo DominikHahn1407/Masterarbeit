@@ -11,7 +11,6 @@ from collections import Counter
 import torch.utils
 from torch.utils.data import Dataset
 import torch.utils.data
-from torchvision.transforms import ToPILImage
 
 
 class DICOMCoarseDataset(Dataset):
@@ -680,12 +679,10 @@ class TransformDatasetFinalFlat(torch.utils.data.Dataset):
     def __init__(self, base_dataset, transform=None):
         self.base_dataset = base_dataset
         self.transform = transform
-        self.to_pil = ToPILImage()
 
     def __getitem__(self, index):
         sample, label_fine = self.base_dataset[index]
-        if isinstance(sample, torch.Tensor):
-            sample = self.to_pil(sample)
+        sample = Image.fromarray(np.uint8(sample))
         if self.transform:
             sample = self.transform(sample)
         return sample, label_fine
