@@ -240,7 +240,7 @@ class DicomCoarseDataset3D(Dataset):
 
 
 class DicomFineDataset3D(Dataset):
-    def __init__(self, root_dir, classes, transform=None, num_slices=16):
+    def __init__(self, root_dir, classes, transform=None, num_slices=16, final_evaluation=False):
         random.seed(41)
         self.root_dir = root_dir
         self.classes = classes
@@ -248,6 +248,9 @@ class DicomFineDataset3D(Dataset):
         self.num_slices = num_slices
         self.image_volumes = []
         self.labels = []
+        self.final_evaluation = final_evaluation
+        self.image_paths = []
+        self.labels_fine = []
 
         file_groups = {}
         for file_name in os.listdir(root_dir):
@@ -257,6 +260,7 @@ class DicomFineDataset3D(Dataset):
                     if prefix not in file_groups:
                         file_groups[prefix] = []
                     file_groups[prefix].append(os.path.join(root_dir, file_name))
+
         for prefix, files in file_groups.items():
             random.shuffle(files)
             for i in range(0, len(files), self.num_slices):
@@ -264,6 +268,9 @@ class DicomFineDataset3D(Dataset):
                 if len(volume_files) == self.num_slices: #Only include complete volumes
                     self.image_volumes.append(volume_files)
                     self.labels.append(self.classes.index(prefix))
+                    if self.final_evaluation:
+                        self.image_paths.append([get_file_index(root_dir, slice_path.split("\\")[-1]) for slice_path in volume_files])
+                        self.labels_fine.append([self.classes.index(prefix) for i in range(len(volume_files))])
 
     def __len__(self):
         # length of outer list (amount of volumes)
@@ -284,7 +291,10 @@ class DicomFineDataset3D(Dataset):
         if self.transform:
             volume = self.transform(volume)
         label = self.labels[index]
-        return volume, label
+        if self.final_evaluation:
+            return volume, label, self.image_paths[index], self.labels_fine[index]
+        else:
+            return volume, label
     
     def get_labels(self):
         return self.labels
@@ -631,22 +641,25 @@ class DICOMFlatDataset(Dataset):
         plt.show()
 
 class TensorFolderDatasetFinal(Dataset):
-    def __init__(self, folder_path):
+    def __init__(self, folder_path, depth=16):
         self.folder_path = folder_path
         self.file_list = [f for f in os.listdir(folder_path) if f.endswith('.pt')]
+        self.depth = depth
 
     def __len__(self):
         return len(self.file_list)
     
     def __getitem__(self, idx):
-        label_fine = None
+        slice_paths, labels_fine = None, None
         file_path = os.path.join(self.folder_path, self.file_list[idx])
         data = torch.load(file_path)
-        if "label_fine" in data:
-            label_fine = data['label_fine']
+        if "slice_paths" in data:
+            slice_paths = data['slice_paths']
+            labels_fine = data['labels_fine']
         else:
-            label_fine = 0
-        return data['image'], data['label'], label_fine
+            slice_paths = torch.Tensor([0 for i in range(self.depth)])
+            labels_fine = torch.Tensor([0 for i in range(self.depth)])
+        return data['image'], data['label'], slice_paths, labels_fine
     
 class TransformDatasetFinal(torch.utils.data.Dataset):
     def __init__(self, base_dataset, transform=None):
@@ -654,26 +667,36 @@ class TransformDatasetFinal(torch.utils.data.Dataset):
         self.transform = transform
 
     def __getitem__(self, index):
-        sample, label, label_fine = self.base_dataset[index]
+        sample, label, slice_paths, labels_fine = self.base_dataset[index]
         if self.transform:
             sample = self.transform(sample)
-        return sample, label, label_fine
+        return sample, label, slice_paths, labels_fine
 
     def __len__(self):
         return len(self.base_dataset)
     
 class TensorFolderDatasetFinalFlat(Dataset):
-    def __init__(self, folder_path):
-        self.folder_path = folder_path
-        self.file_list = [f for f in os.listdir(folder_path) if f.endswith('.pt')]
+    def __init__(self, tensor_folder_path, dicom_folder_path):
+        self.tensor_folder_path = tensor_folder_path
+        self.dicom_folder_path = dicom_folder_path
+        self.indices = []
+        self.labels = []
+        for pt_file in os.listdir(tensor_folder_path):
+            temp_pt_file = torch.load(os.path.join(tensor_folder_path, pt_file))
+            for index, value in zip(temp_pt_file['slice_paths'], temp_pt_file['label_fine']):
+                key = sorted(os.listdir(dicom_folder_path))[index]
+                self.indices.append(key)
+                self.labels.append(value)
 
     def __len__(self):
-        return len(self.file_list)
+        return len(self.indices)
     
     def __getitem__(self, idx):
-        file_path = os.path.join(self.folder_path, self.file_list[idx])
-        data = torch.load(file_path)
-        return data['image'], data['label_fine']
+        key = self.indices[idx]
+        dicom_image = pydicom.dcmread(os.path.join(self.dicom_folder_path, key))
+        image = dicom_image.pixel_array
+        image = Image.fromarray(np.uint8(image))
+        return image, self.labels[idx]
     
 class TransformDatasetFinalFlat(torch.utils.data.Dataset):
     def __init__(self, base_dataset, transform=None):
@@ -682,10 +705,39 @@ class TransformDatasetFinalFlat(torch.utils.data.Dataset):
 
     def __getitem__(self, index):
         sample, label_fine = self.base_dataset[index]
-        sample = Image.fromarray(np.uint8(sample))
         if self.transform:
             sample = self.transform(sample)
         return sample, label_fine
 
     def __len__(self):
         return len(self.base_dataset)
+    
+def get_file_index(folder_path, target_file):
+    try:
+        file_list = sorted(os.listdir(folder_path))
+        index = file_list.index(target_file)
+        return index
+    except ValueError:
+        return -1
+    
+def save_images_2D(file_dir, output_dir):
+    for i, item in enumerate(os.listdir(file_dir)):
+        if item != "2D":
+            file_path = os.path.join(file_dir, item)
+            data = torch.load(file_path)
+            volume = data['image']
+            label = data['label']
+            label_fine = data['label_fine']
+            if volume.shape[0] == 1:
+                volume = volume.squeeze(0)
+            if isinstance(volume, torch.Tensor):
+                volume = volume.cpu().numpy()
+            for j in range(volume.shape[0]):
+                slice_image = volume[j]
+                slice_data = {
+                    'image': slice_image,
+                    'label': label,
+                    'label_fine': label_fine
+                }
+                slice_file_path = os.path.join(output_dir, f"tensor_{i}_slice_{j}_label_{label}_label_fine_{label_fine}.pt")
+                torch.save(slice_data, slice_file_path)

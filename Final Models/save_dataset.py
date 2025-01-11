@@ -2,8 +2,7 @@ import torch
 import os
 
 from torch.utils.data import random_split
-from utils import DICOMCoarseDataset, DicomCoarseDataset3D, DICOMFineDataset, DicomFineDataset3D, DICOMFlatDataset
-
+from utils import DicomFineDataset3D
 def save_subset_locally(save_folder, subset):
     os.makedirs(save_folder, exist_ok=True)
     for i, (image, label) in enumerate(subset):
@@ -25,7 +24,4 @@ if __name__ == "__main__":
     val_size = int(((1-train_ratio)/2) * len(dataset)) 
     test_size = len(dataset) - train_size - val_size
     train_indices, val_indices, test_indices = random_split(dataset, [train_size, val_size, test_size])
-    
-    save_subset_locally(os.path.join(save_folder, "train"), train_indices)
-    save_subset_locally(os.path.join(save_folder, "val"), val_indices)
-    save_subset_locally(os.path.join(save_folder, "test"), test_indices)
+    save_subset_locally(os.path.join(save_folder, "test_coarse"), test_indices)
