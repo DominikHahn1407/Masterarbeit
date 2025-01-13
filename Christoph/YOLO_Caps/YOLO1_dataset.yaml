@@ -1,0 +1,7 @@
+path: D:/Datasets/YOLO_1_Dataset
+train: train/images
+val: val/images
+test: test/images  # Optional, falls Testdaten vorhanden
+
+names:
+  0: "class1"
