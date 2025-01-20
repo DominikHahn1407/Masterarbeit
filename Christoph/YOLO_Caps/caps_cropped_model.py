@@ -303,6 +303,23 @@ class CapsuleNetwork(nn.Module):
         self.display_confusion_matrix(torch.tensor(true_labels), torch.tensor(pred_labels))
         # return last batch of capsule vectors, images, reconstructions
         return caps_output, images, reconstructions
+    
+    def run_model(self, test_loader):
+        all_preds=[]
+        all_paths=[]
+        with torch.no_grad():
+            for batch_i, (images, paths) in enumerate(test_loader):               
+                if self.train_on_gpu:
+                    images= images.cuda()
+                caps_output, reconstructions, y = self.forward(images)
+                
+                _, pred = torch.max(y.data.cpu(), 1)
+                # Ergebnisse des aktuellen Batches sammeln
+                all_preds.extend(pred.tolist())  # Vorhersagen zur Liste hinzufügen
+                all_paths.extend(list(paths))   # Dateipfade zur Liste hinzufügen
+                print("Batch number: ",batch_i)
+                    
+        return all_preds, all_paths
 
 class ConvLayer(nn.Module):
     def __init__(self, in_channels, out_channels, kernel_size, stride, padding):

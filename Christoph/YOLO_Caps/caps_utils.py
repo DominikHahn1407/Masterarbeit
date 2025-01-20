@@ -201,3 +201,76 @@ def display_data_loader_batch(data_loader, classes):
             axes[i].set_title(f"Label: {list(self.classes.keys())[label]}")
             axes[i].axis("off")
         plt.show()
+
+
+class CAPS_Productive_Dataset(Dataset):
+    def __init__(self, root_dir, num_images_per_class, classes, transform=None, scenario=1):
+        random.seed(41)
+        self.root_dir = root_dir
+        self.num_images_per_class = num_images_per_class
+        self.classes = classes
+        self.transform = transform
+        self.image_paths = []
+        self.labels = []
+
+        # Durchlaufe die Klassen (z. B. 'nodule' und 'non-nodule')
+        for class_label, class_name in enumerate(self.classes):
+            class_folder = os.path.join(root_dir, class_name)
+            if os.path.isdir(class_folder):
+                # Finde alle JPEG-Bilder
+                jpeg_files = [f for f in os.listdir(class_folder) if f.endswith('.jpeg') or f.endswith('.jpg') or f.endswith('.JPEG')]
+
+                # Wähle zufällig aus, wenn mehr Bilder als benötigt vorhanden sind
+                if len(jpeg_files) > self.num_images_per_class:
+                    selected_files = random.sample(jpeg_files, self.num_images_per_class)
+                # Wähle alle Bilder aus, wenn weniger Bilder als benötigt vorhanden sind
+                else:
+                    selected_files = jpeg_files
+
+                # Speichere die Pfade und zugehörigen Labels
+                for file_name in selected_files:
+                    self.image_paths.append(os.path.join(class_folder, file_name))
+                    self.labels.append(class_label)
+        
+
+    def __len__(self):
+        return len(self.image_paths)
+    
+    def __getitem__(self, index):
+        img_path = self.image_paths[index]
+        image = Image.open(img_path)
+        image = Image.fromarray(np.uint8(image))
+
+        if self.transform:
+            image = self.transform(image)
+        # label = self.labels[index]
+        label=os.path.basename(img_path)
+        return image, label
+    
+    def get_labels(self):
+        return self.labels
+    
+    def display_label_distribution(self):
+        label_counts = Counter(self.labels)
+        labels, counts = zip(*label_counts.items())
+        plt.bar(labels, counts)
+        plt.xlabel("Label")
+        plt.ylabel("Count")
+        plt.title("Label Distribution")
+        plt.xticks(labels, [self.classes[label] for label in labels])
+        plt.show()
+    
+    def visualize_images(self, num_images=5):
+        num_images = min(num_images, len(self.image_paths))
+        _, axes = plt.subplots(1, num_images, figsize=(15,15))
+        if num_images == 1:
+            axes = [axes]
+        for i in range(num_images):
+            random_index = random.randint(0, len(self.image_paths)-1)
+            image, label = self.__getitem__(random_index)
+            if isinstance(image, torch.Tensor):
+                image = image.squeeze().numpy()
+            axes[i].imshow(image, cmap="gray")
+            axes[i].set_title(f"Label: {self.classes[label]}")
+            axes[i].axis("off")
+        plt.show()

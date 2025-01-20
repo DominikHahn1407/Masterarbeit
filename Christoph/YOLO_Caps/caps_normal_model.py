@@ -301,6 +301,25 @@ class CapsuleNetwork(nn.Module):
             100. * np.sum(class_correct) / np.sum(class_total),
             np.sum(class_correct), np.sum(class_total)))
         self.display_confusion_matrix(torch.tensor(true_labels), torch.tensor(pred_labels))
+        tp = ((torch.tensor(pred_labels) == 0) & (torch.tensor(true_labels) == 0)).sum().item()  # Vorhersage: 0 (positive), Realität: 0 (positive)
+        fp = ((torch.tensor(pred_labels) == 0) & (torch.tensor(true_labels) == 1)).sum().item()  # Vorhersage: 0 (positive), Realität: 1 (negative)
+        fn = ((torch.tensor(pred_labels) == 1) & (torch.tensor(true_labels) == 0)).sum().item()  # Vorhersage: 1 (negative), Realität: 0 (positive)
+        tn = ((torch.tensor(pred_labels) == 1) & (torch.tensor(true_labels) == 1)).sum().item()  # Vorhersage: 1 (negative), Realität: 1 (negative)
+
+        
+        precision = tp / (tp + fp) if (tp + fp) > 0 else 0
+        recall = tp / (tp + fn) if (tp + fn) > 0 else 0
+        f1_score = 2 * (precision * recall) / (precision + recall) if (precision + recall) > 0 else 0
+
+
+        # Ausgabe
+        print(f"True Positives (TP): {tp}")
+        print(f"False Positives (FP): {fp}")
+        print(f"False Negatives (FN): {fn}")
+        print(f"True Negatives (TN): {tn}")
+        print(f"Precision: {precision:.2f}")
+        print(f"Recall: {recall:.2f}")
+        print(f"F1 Score: {f1_score:.2f}")
         # return last batch of capsule vectors, images, reconstructions
         return caps_output, images, reconstructions
 
