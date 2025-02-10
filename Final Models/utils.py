@@ -15,6 +15,17 @@ import torch.utils.data
 
 class DICOMCoarseDataset(Dataset):
     def __init__(self, root_dir, num_images_per_class, classes, transform=None, scenario=1):
+        '''
+        Initializes the dataset by selecting a specified number of DICOM images per class 
+        and storing their file paths along with corresponding labels.
+
+        Args:
+            root_dir (str): The directory containing class subfolders with DICOM images.
+            num_images_per_class (int): Number of images to select per class.
+            classes (list): List of class names (subfolder names).
+            transform (torchvision.transforms): A function for data transformations.
+            scenario (int): Defines the selection process for non-nodule images.
+        '''
         random.seed(41)
         self.root_dir = root_dir
         self.num_images_per_class = num_images_per_class
@@ -22,34 +33,42 @@ class DICOMCoarseDataset(Dataset):
         self.transform = transform
         self.image_paths = []
         self.labels = []
-
+        # If scenario 2 is selected only the non nodule images of the LIDC-IDRI dataset are included
         if scenario == 2:
             temp_folder = os.path.join(root_dir, "non-nodule")
             self.num_images_per_class = len([f for f in os.listdir(temp_folder) if f.endswith('.dcm') and f.startswith('N')])
-
+        # For each class iterate through the specific subfolder in the folder location
         for class_label, class_name in enumerate(self.classes):
             class_folder = os.path.join(root_dir, class_name)
             if os.path.isdir(class_folder):
+                # create a list of all paths to the dicom files in each subfolder
                 dicom_files = [f for f in os.listdir(class_folder) if f.endswith('.dcm')]
 
                 if class_name == "non-nodule":
+                    # if scenario 2 is selected only include non nodule images from the LIDC-IDRI dataset
                     if scenario == 2:
                         dicom_files = [f for f in dicom_files if f.startswith('N')]
+                    # if scenario 3 is selected only include non nodule images from the Lung-PET-CT-Dx dataset
                     elif scenario == 3:
                         dicom_files = [f for f in dicom_files if not f.startswith('N')]
+                # if the number of images per class is set, then randomly subsample as many images as specified
                 if len(dicom_files) >= self.num_images_per_class:
                     selected_files = random.sample(dicom_files, self.num_images_per_class)
                 else:
                     selected_files = dicom_files
                 for file_name in selected_files:
+                    # create a list for all the dicom image paths and for all the corresponding labels
                     self.image_paths.append(os.path.join(class_folder, file_name))
                     self.labels.append(class_label)
         
 
     def __len__(self):
+        # overwrite the length of the dataset with the amount of available image paths
         return len(self.image_paths)
     
     def __getitem__(self, index):
+        # if an instance of the dataset is retrieved, the dicom image is converted to a pillow image
+        # and returned with its corrsponding label
         img_path = self.image_paths[index]
         dicom_image = pydicom.dcmread(img_path)
         image = dicom_image.pixel_array
@@ -60,9 +79,11 @@ class DICOMCoarseDataset(Dataset):
         return image, label
     
     def get_labels(self):
+        # function to return all the labels of the dataset
         return self.labels
     
     def display_label_distribution(self):
+        # function to visualize the label distribution in the dataset as a barchart
         label_counts = Counter(self.labels)
         labels, counts = zip(*label_counts.items())
         plt.bar(labels, counts)
@@ -73,6 +94,7 @@ class DICOMCoarseDataset(Dataset):
         plt.show()
     
     def visualize_images(self, num_images=5):
+        # function to visualize a specified amount of images with their corresponding labels
         num_images = min(num_images, len(self.image_paths))
         _, axes = plt.subplots(1, num_images, figsize=(15,15))
         if num_images == 1:
