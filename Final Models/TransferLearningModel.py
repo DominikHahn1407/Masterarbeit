@@ -16,6 +16,19 @@ from Unet import UNet
 
 class TransferLearningModel(nn.Module):
     def __init__(self, classes, model_name, device='cuda' if torch.cuda.is_available() else 'cpu', learning_rate=0.001, data_augmentation=False, fine=False, scenario=1, flat=False):
+        '''
+        A transfer learning model wrapper for classification tasks using pretrained deep learning models.
+
+        Attributes:
+            classes (list): The classes for classification.
+            model_name (str): The name of the pretrained model.
+            device (str): Specifies whether to run the model on 'cuda' (GPU) or 'cpu'.
+            learning_rate (float): The initial learning rate for training.
+            data_augmentation (bool): Whether to apply data augmentation during training.
+            fine (bool): Determines if the model is for the coarse or fine hierarchical level.
+            scenario (int): Defines which scenario is used for training.
+            flat (bool): Indicates whether the model is used for the flat classification scenario.
+        '''
         super(TransferLearningModel, self).__init__()
         self.classes = classes
         self.device = device
@@ -25,7 +38,7 @@ class TransferLearningModel(nn.Module):
         self.scenario = scenario
         self.flat = flat
         self.model = None
-        # Initialize the model based on model_name
+        # Load the specific Transfer Learning Model, the 3D CNN or the U-Net and calculate the input dimension based on the model name
         if self.model_name == "resnet":
             self.model = models.resnet50(weights=ResNet50_Weights.IMAGENET1K_V1)
             in_features = self.model.fc.in_features
@@ -34,6 +47,7 @@ class TransferLearningModel(nn.Module):
             self.model = models.densenet121(weights=DenseNet121_Weights.IMAGENET1K_V1)
             in_features = self.model.classifier.in_features
             self.model.classifier = nn.Linear(in_features, len(self.classes))
+        # This model is implemented for future enhancements but as it needs other image sizes than the other models, it was not included in this work
         elif self.model_name == "inception":
             self.model = models.inception_v3(weights=Inception_V3_Weights.IMAGENET1K_V1)
             in_features = self.model.fc.in_features
@@ -82,6 +96,7 @@ class TransferLearningModel(nn.Module):
         normalize = transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
 
         if self.model_name == "inception":
+            # Creation of the training and test transformations when the Inception Model is used
             self.resize_dim = (299, 299)
             # Inception requires 299x299 input images
             train_transforms = transforms.Compose([
@@ -96,6 +111,7 @@ class TransferLearningModel(nn.Module):
                 transforms.ToTensor(),
                 normalize
             ])
+            # Add the data augmentation techniques to the train transformations when data augmentation is applied
             if self.data_augmentation:
                 train_transforms = transforms.Compose([
                     transforms.Grayscale(num_output_channels=3),
@@ -109,11 +125,13 @@ class TransferLearningModel(nn.Module):
                     transforms.ToTensor(),
                     normalize
                 ])
+        # if the 3D CNN is used, the Custom 3D Transformations from the 3D CNN class are applied
         elif self.model_name == "3dcnn":
             self.resize_dim = (224, 224)
             train_transforms = Custom3DTransform(resize=self.resize_dim, data_augmentation=self.data_augmentation, flip_prob=0.5)
             test_transforms = Custom3DTransform(resize=self.resize_dim, flip_prob=0.0)
         else:
+            # Creation of the training and test transformations for the models which are not the 3D CNN and the Inception
             self.resize_dim = (224, 224)
             # Default input size for most other models is 224x224
             train_transforms = [
@@ -129,6 +147,7 @@ class TransferLearningModel(nn.Module):
                 normalize
             ])
         if self.model_name != "3dcnn" and self.model_name != "inception":
+            # Add the data augmentation techniques to the train transformations when data augmentation is applied
             if self.data_augmentation:
                 train_transforms += [                
                     transforms.RandomHorizontalFlip(),
@@ -140,10 +159,11 @@ class TransferLearningModel(nn.Module):
                 ]
             train_transforms = transforms.Compose(train_transforms)
 
-        return train_transforms, test_transforms
+        return train_transforms, test_transforms # return the trainsformations for their application in the notebook pipelines
 
     def train(self, train_loader, val_loader, early_stopping, epochs=5):
         min_val_loss = None
+        # Create the file name for the model weights based on data augmentation, the scenario and the name of the model
         weight_file_name = f"weights/coarse/scenario{self.scenario}/{self.model_name}.pt"
         # always new if in the case of overlapping scenarios to always use last scenario
         if self.data_augmentation and not self.fine:
@@ -159,12 +179,14 @@ class TransferLearningModel(nn.Module):
         self.train_losses = []
         self.val_losses = []
 
+        # When the weights of the model already exist, they will be loaded for the starting point of the training phase
         if min_val_loss is None and os.path.exists(weight_file_name):
             print("Weights already exist, start from best previous values.")
             checkpoint = torch.load(weight_file_name, weights_only=False)
             min_val_loss = checkpoint["loss"]
             self.model.load_state_dict(checkpoint["model_state_dict"])
 
+        # Training loop for the different models
         for epoch in range(epochs):
             self.model.train()
             if self.model_name == "inception":
@@ -176,6 +198,7 @@ class TransferLearningModel(nn.Module):
             for inputs, labels in train_loader:
                 inputs, labels = inputs.to(self.device), labels.to(self.device)
                 self.optimizer.zero_grad()
+                # Predict the input
                 outputs = self.model(inputs)
                 # Handle Inception model output
                 if self.model_name == "inception":
@@ -185,15 +208,15 @@ class TransferLearningModel(nn.Module):
                 else:
                     logits = outputs
                     loss = self.criterion(logits, labels)
-
+                # Execute Backpropagation
                 loss.backward()
                 self.optimizer.step()
-
+                # Calculate the amount of correct predictions
                 running_loss += loss.item() * inputs.size(0)
                 _, predicted = logits.max(1)
                 total += labels.size(0)
                 correct += predicted.eq(labels).sum().item()
-            
+            # calculate the loss of the epoch and the current accuracy
             epoch_loss = running_loss / len(train_loader.dataset)
             epoch_acc = 100 * correct / total
             self.train_losses.append(epoch_loss)
@@ -206,6 +229,7 @@ class TransferLearningModel(nn.Module):
             val_total = 0
 
             with torch.no_grad():
+                # calculate the loss and accuracy for the predicitons on the validation set for the classification model
                 for inputs, labels in val_loader:
                     inputs, labels = inputs.to(self.device), labels.to(self.device)
                     outputs = self.model(inputs)
@@ -218,8 +242,9 @@ class TransferLearningModel(nn.Module):
             val_epoch_loss = val_running_loss / len(val_loader.dataset)
             val_epoch_acc = 100 * val_correct / val_total
             self.val_losses.append(val_epoch_loss)
+            # Display the epoch as well as the loss and the accuracy for the training and validation set
             print(f"Epoch {epoch+1}/{epochs} ----- Loss: {epoch_loss:.4f}, Accuracy: {epoch_acc:.2f}% ----- Validation Loss: {val_epoch_loss:.4f}, Validation Accuracy: {val_epoch_acc:.2f}%")
-
+            # If no weights exist or the validation loss is better than the best current validation loss, then the current weights will be saved
             if min_val_loss == None or val_epoch_loss < min_val_loss:
                 min_val_loss = val_epoch_loss
                 checkpoint = {
@@ -232,10 +257,12 @@ class TransferLearningModel(nn.Module):
             if early_stopping.early_stop:
                 print("Early stopping triggered")
                 break
+        # Create a plot of the training and vlaidation loss for the training phase of the model and save it to the weights
         loss_plot_path = weight_file_name.replace('.pt', '_loss_plot.png')
         self.plot_loss(save_path=loss_plot_path)   
 
     def evaluate(self, test_loader):
+        # Evaluation method for the Classification model for the test set
         self.model.eval()
         correct = 0
         total = 0
@@ -252,7 +279,7 @@ class TransferLearningModel(nn.Module):
                 outputs = self.model(inputs)
                 loss = self.criterion(outputs, labels)
                 
-                # Statistics
+                # Calculate the amount of correct predictions for the confusion matrix
                 running_loss += loss.item() * inputs.size(0)
                 _, predicted = outputs.max(1)
                 total += labels.size(0)
@@ -263,16 +290,18 @@ class TransferLearningModel(nn.Module):
 
         avg_loss = running_loss / len(test_loader.dataset)
         accuracy = 100 * correct / total
+        # Display a Confusion Matrix for the predictions on the test set
         cm = confusion_matrix(true_labels, pred_labels)
         disp = ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=self.classes)
         print(f"Evaluation Accuracy on unseen data: {accuracy}")
-        # Plot confusion matrix
         plt.figure(figsize=(10, 8))
         disp.plot(cmap=plt.cm.Reds, values_format='d')
         plt.title("Confusion Matrix")
         plt.show()
     
     def evaluate_final(self, test_loader, save_dir=None):
+        # Evaluation method for the Classification model for the test set in the final ground truth performance evaluation
+        # the save_dir is used to save the true positives of the coarse classifier in the simultaneous identification and classification
         self.model.eval()
         correct = 0
         total = 0
@@ -290,7 +319,7 @@ class TransferLearningModel(nn.Module):
                 # Forward pass
                 outputs = self.model(inputs)
                 loss = self.criterion(outputs, labels)
-                # Statistics
+                # Calculate the amount of correct predictions for the confusion matrix
                 running_loss += loss.item() * inputs.size(0)
                 _, predicted = outputs.max(1)
                 total += labels.size(0)
@@ -307,6 +336,8 @@ class TransferLearningModel(nn.Module):
         cm = confusion_matrix(true_labels, pred_labels)
         if save_dir is not None:
             for i in range(len(true_labels)):
+                # Save all the true positive (nodule) images together with the coarse label, the fine label and the image path of the original 2D ct slice
+                # for later classification of the fine classifier
                 if true_labels[i] == 0 and pred_labels[i] == 0:
                     save_path = os.path.join(save_dir, f"tensor_{i}_label_coarse_{true_labels[i]}_label_fine_{int(labels_fine_list[i][0])}.pt")
                     torch.save({
@@ -315,15 +346,16 @@ class TransferLearningModel(nn.Module):
                         "slice_paths": [int(item) for item in slice_path_list[i]],
                         "label_fine": [int(item) for item in labels_fine_list[i]]
                     }, save_path)
+        # Display a Confusion Matrix for the predictions on the test set
         disp = ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=self.classes)
         print(f"Evaluation Accuracy on unseen data: {accuracy}")
-        # Plot confusion matrix
         plt.figure(figsize=(10, 8))
         disp.plot(cmap=plt.cm.Reds, values_format='d')
         plt.title("Confusion Matrix")
         plt.show()
     
     def predict(self, inputs):
+        # method for the prediction of inputs for the operation mode of the classification model
         self.model.eval()
         inputs = inputs.to(self.device)
         with torch.no_grad():
@@ -332,6 +364,7 @@ class TransferLearningModel(nn.Module):
         return predicted.cpu().numpy()
     
     def plot_loss(self, save_path=None):
+        # Function to plot the training and validation loss of the model throughout the training phase
         plt.figure(figsize=(10, 6))
         plt.plot(self.train_losses, label='Training Loss')
         plt.plot(self.val_losses, label='Validation Loss')
