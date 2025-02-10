@@ -12,7 +12,14 @@ from torchvision.transforms.functional import rotate, resized_crop, affine
 
 class CNN3D(nn.Module):
     def __init__(self, image_size, classes):
+        '''Initialization of the 3D CNN.
+
+        Args:
+            image_size (int): Size of the input image (height/width).
+            classes (list): List of the different classes.
+        '''
         super(CNN3D, self).__init__()
+        # create 2 sets of 3D Conv, Leaky Relu and 3D Max Pooling
         self.conv_layer1 = self._conv_layer_set(1, 32)
         self.conv_layer2 = self._conv_layer_set(32, 64)
         # Calculate the flattened size after convolutions
@@ -21,6 +28,7 @@ class CNN3D(nn.Module):
         # After the first MaxPool3D, shape will be (32, 32, 7, 111, 111)
         # After the second Conv3D, shape will be (32, 64, 5, 109, 109)
         # After the second MaxPool3D, shape will be (32, 64, 2, 54, 54)
+        # Add two Dense layers as classification head and apply Dropout, Batchnormalization and Leaky Relu
         self.fc1 = nn.Linear(64 * 2 * 54 * 54, 128)
         self.fc2 = nn.Linear(128, len(classes))
         self.relu = nn.LeakyReLU()
@@ -28,6 +36,7 @@ class CNN3D(nn.Module):
         self.dropout = nn.Dropout(p=0.15)
         
     def _conv_layer_set(self, in_c, out_c):
+        # private function to create a set of 3D convolution layer, leaky activation function and 3D max pooling
         return nn.Sequential(
             nn.Conv3d(in_c, out_c, kernel_size=(3,3,3), padding=0),
             nn.LeakyReLU(),
@@ -35,6 +44,7 @@ class CNN3D(nn.Module):
         )
     
     def forward(self, x):
+        # Pass the image through the different layers
         # Input shape: [batch_size, 1, num_slices, image_size, image_size]
         out = self.conv_layer1(x)
         out = self.conv_layer2(out)
@@ -50,6 +60,16 @@ class CNN3D(nn.Module):
 
 class Custom3DTransform:
     def __init__(self, resize=(224,224), data_augmentation=False, num_channels=1, normalize_means=0.485, normalize_stds=0.229, flip_prob=0.5):
+        ''' A custom transformation class for preprocessing 3D images.
+
+        Args:
+            resize (tuple): Target size for image resizing (default: (224, 224)).
+            data_augmentation (bool): Enables/disables data augmentation (default: False).
+            num_channels (int): Number of input image channels (default: 1).
+            normalize_means (float): Mean value used for normalization (default: 0.485).
+            normalize_stds (float): Standard deviation used for normalization (default: 0.229).
+            flip_prob (float): Probability of applying a random flip (default: 0.5).
+        '''
         super(Custom3DTransform, self).__init__()
         self.resize_value = resize
         self.data_augmentation = data_augmentation
@@ -66,19 +86,22 @@ class Custom3DTransform:
         return volume_gray 
     
     def resize(self, volume):
-        # Resize each frame
+        # Resize each frame of the 3D volume
         return np.array([np.array(Image.fromarray(frame).resize(self.resize_value)) for frame in volume])
     
     def random_horizontal_flip(self, volume):
+        # Randomly applies by the flip probability a horizontal flip to all frames in the volume
         if random.random() < self.flip_prob:
             return np.array([np.fliplr(frame) for frame in volume])
         return volume
     
     def random_rotation(self, volume, degrees=15):
+        # Randomly rotates all the slices of the 3D volume
         angle = random.uniform(-degrees, degrees)
         return np.array([np.array(rotate(Image.fromarray(frame), angle)) for frame in volume])
     
     def random_resized_crop(self, volume, scale=(0.8, 1.2), ratio=(0.9, 1.1)):
+        # Randomly crops all the slices of the 3D volume
         h, w = volume.shape[1:3]
         crop_h = min(int(h * random.uniform(*scale)),h)
         crop_w = min(int(w * random.uniform(*ratio)),w)
@@ -90,6 +113,7 @@ class Custom3DTransform:
         ])
 
     def random_shear(self, volume, shear=10):
+        # Randomly shears all the slices of the 3D volume
         shear_x = random.uniform(-shear, shear)
         shear_y = random.uniform(-shear, shear)
         return np.array([
@@ -103,10 +127,11 @@ class Custom3DTransform:
         return volume
     
     def to_tensor(self, volume):
+        # Convert the 3D volume to a Tensor
         volume = np.expand_dims(volume, axis=0)
         return torch.tensor(volume, dtype=torch.float32)
     
-    def __call__(self, volume):#need to be overwritten cause the dataloader does overwrite init function
+    def __call__(self, volume): # needs to be overwritten cause the dataloader does overwrite the init function
         volume = self.grayscale(volume)
         if self.data_augmentation:
             volume = self.random_horizontal_flip(volume)

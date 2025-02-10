@@ -26,6 +26,25 @@ class CapsuleNetwork(nn.Module):
             out_channels_digit=16, 
             hidden_dim=512, 
             train_on_gpu=True):
+        '''Initialization of the Capsule Network.
+
+        Args:
+            image_size (int): Size of the input image (height/width).
+            in_channels_conv (int): Number of input channels for the initial convolutional layer.
+            out_channels_conv (int): Number of output channels for the convolutional layer.
+            kernel_size_conv (int): Kernel size of the convolutional layer.
+            stride_conv (int): Stride of the convolutional layer.
+            padding_conv (int): Padding for the convolutional layer.
+            num_capsules_prime (int): Number of primary capsule types.
+            out_channels_prime (int): Number of output channels for each primary capsule.
+            kernel_size_prime (int): Kernel size for the primary capsule layer.
+            stride_prime (int): Stride for the primary capsule layer.
+            padding_prime (int): Padding for the primary capsule layer.
+            num_classes (int): Number of output classes.
+            out_channels_digit (int): Number of output channels per digit capsule.
+            hidden_dim (int): Number of neurons in the decoder's hidden layer.
+            train_on_gpu (bool): Whether to enable GPU acceleration.
+        '''
         super(CapsuleNetwork, self).__init__()
         self.image_size = image_size
         self.num_classes = num_classes
@@ -52,28 +71,32 @@ class CapsuleNetwork(nn.Module):
         self.decoder = Decoder(image_size=image_size, input_vector_length=out_channels_digit, hidden_dim=hidden_dim, num_classes=num_classes, train_on_gpu=train_on_gpu)
 
     def forward(self, images):
+        # passes the image through the different layers of the CapsNet model and returns the predictions, the reconstructions and the original label
         primary_caps_output = self.primary_capsules(self.conv_layer(images))
         # squeeze removes dimensions of size 1 and then transpose 0 and 1 dim (10,20,1,1,16)-->(20,10,16)
         caps_output = self.digit_capsules(primary_caps_output).squeeze().transpose(0,1)
         reconstructions, y = self.decoder(caps_output)
         return caps_output, reconstructions, y
     
+    # training loop for the capsule netwok
     def train_model(self, train_loader, criterion, optimizer, n_epochs, print_every=300):
         losses = []
         for epoch in range(1, n_epochs+1):
             train_loss = 0.0
             self.train()
             for batch_i, (images, target) in enumerate(train_loader):
+                # one hot encoding for the label
                 target = torch.eye(self.num_classes).index_select(dim=0, index=target)
                 if self.train_on_gpu:
                     images, target = images.cuda(), target.cuda()
                 optimizer.zero_grad()
+                # make the prediciton for the images within the batch and calulate the loss from those and execute the backpropagation
                 caps_output, reconstructions, y = self.forward(images)
                 loss = criterion(caps_output, target, images, reconstructions)
                 loss.backward()
                 optimizer.step()
                 train_loss += loss.item()
-
+                # custom printing function for the training loss throughout the training phase
                 if batch_i != 0 and batch_i % print_every == 0:
                     avg_train_loss = train_loss/print_every
                     losses.append(avg_train_loss)
@@ -82,6 +105,7 @@ class CapsuleNetwork(nn.Module):
         return losses
     
     def display_confusion_matrix(self, true_labels, pred_labels):
+        # function for the visualization of a confucions matrix based on the predictions and the true labels
         cm = confusion_matrix(true_labels, pred_labels)
         plt.figure(figsize=(8,6))
         plt.imshow(cm, interpolation="nearest", cmap=plt.cm.Reds)
@@ -100,6 +124,7 @@ class CapsuleNetwork(nn.Module):
         plt.show()
     
     def test_model(self, criterion, test_loader):
+        # function for the evaluation of the capsnet model
         class_correct = list(0. for i in range(self.num_classes))
         class_total = list(0. for i in range(self.num_classes))
         true_labels = []
@@ -108,16 +133,20 @@ class CapsuleNetwork(nn.Module):
         self.eval()
 
         for batch_i, (images, target) in enumerate(test_loader):
+            # one hot encoding of the label
             target = torch.eye(self.num_classes).index_select(dim=0, index=target)
             batch_size = images.size(0)
             if self.train_on_gpu:
                 images, target = images.cuda(), target.cuda()
+            # predicting the images of a batch of the test loader
             caps_output, reconstructions, y = self.forward(images)
+            # calculate the loss but do not execute backpropagation
             loss = criterion(caps_output, target, images, reconstructions)
             test_loss += loss.item()
             _, pred = torch.max(y.data.cpu(), 1)
             _, target_shape = torch.max(target.data.cpu(), 1)
             correct = np.squeeze(pred.eq(target_shape.data.view_as(pred)))
+            # append the true labels and the predictions to a list
             true_labels.extend(target_shape.tolist())
             pred_labels.extend(pred.tolist())
 
@@ -125,6 +154,7 @@ class CapsuleNetwork(nn.Module):
                 label = target_shape.data[i]
                 class_correct[label] += correct[i].item()
                 class_total[label] += 1
+        # calculate the average loss of the model on the test set and calculate the corresponding accuracy
         avg_test_loss = test_loss / len(test_loader)
         print('Test Loss: {:.8f}\n'.format(avg_test_loss))
         for i in range(self.num_classes):
@@ -138,12 +168,22 @@ class CapsuleNetwork(nn.Module):
         print('\nTest Accuracy (Overall): %.2f%% (%2d/%2d)' % (
             100. * np.sum(class_correct) / np.sum(class_total),
             np.sum(class_correct), np.sum(class_total)))
+        # display the confusion matrix for the evaluation of the CapsNet Model
         self.display_confusion_matrix(torch.tensor(true_labels), torch.tensor(pred_labels))
         # return last batch of capsule vectors, images, reconstructions
         return caps_output, images, reconstructions
 
 class ConvLayer(nn.Module):
     def __init__(self, in_channels, out_channels, kernel_size, stride, padding):
+        '''Initializes the ConvLayer.
+
+        Args:
+            in_channels (int): Number of input channels (depth of the input tensor).
+            out_channels (int): Number of filters (output feature maps).
+            kernel_size (int or tuple): Size of the convolutional kernel.
+            stride (int): Stride of the convolution (step size).
+            padding (int): Amount of padding added to the input before convolution.
+        '''
         super(ConvLayer, self).__init__()
         self.conv = nn.Conv2d(in_channels, out_channels, kernel_size, stride, padding)
     
@@ -156,11 +196,22 @@ class ConvLayer(nn.Module):
 class PrimaryCaps(nn.Module):
     # out channels is in channels divided by number of capsules
     def __init__(self, num_capsules, in_channels, out_channels, kernel_size, stride, padding):
+        '''Initializes the PrimaryCaps layer.
+
+        Args:
+            num_capsules (int): The number of capsule types.
+            in_channels (int): Number of input channels (from the previous layer).
+            out_channels (int): Number of output channels per capsule.
+            kernel_size (int or tuple): Size of the convolutional kernel.
+            stride (int): Stride of the convolution.
+            padding (int): Padding added to the input tensor before applying convolution.
+        '''
         super(PrimaryCaps, self).__init__()
         self.out_channels = out_channels
         self.capsules = nn.ModuleList([nn.Conv2d(in_channels, out_channels, kernel_size, stride, padding) for _ in range(num_capsules)])
 
     def forward(self, x):
+        # Pass the data instance through the various capsules and apply the squash function
         batch_size = x.size(0)
         u = [capsule(x).view(batch_size, self.out_channels * capsule(x).shape[2] * capsule(x).shape[2], 1) for capsule in self.capsules]
         u = torch.cat(u, dim=-1)
@@ -168,6 +219,10 @@ class PrimaryCaps(nn.Module):
         return u_squash
     
     def squash(self, input_tensor):
+        '''Squashes an input Tensor so it has a magnitude between 0-1.
+           param input_tensor: a stack of capsule inputs, s_j
+           return: a stack of normalized, capsule output vectors, v_j
+        '''
         squared_norm = (input_tensor ** 2).sum(dim=-1, keepdim=True)
         scale = squared_norm / (1+squared_norm)
         output_tensor = scale * input_tensor / torch.sqrt(squared_norm)
@@ -180,7 +235,7 @@ class DigitCaps(nn.Module):
            param previous_layer_nodes: dimension of input capsule vector, default value = 1152
            param in_channels: number of capsules in previous layer, default value = 8
            param out_channels: dimensions of output capsule vector, default value = 16
-           '''
+        '''
         super(DigitCaps, self).__init__()
 
         # setting class variables
@@ -195,10 +250,6 @@ class DigitCaps(nn.Module):
                                     self.in_channels, self.out_channels)))
 
     def forward(self, u):
-        '''Defines the feedforward behavior.
-           param u: the input; vectors from the previous PrimaryCaps layer
-           return: a set of normalized, capsule output vectors
-           '''
         # adding batch_size dims and stacking all u vectors
         u = u[None, :, :, None, :] # doppelpunkt nimmt die dimension aus original, none added eine dimension mit länge 1
         # 4D weight matrix
@@ -222,7 +273,7 @@ class DigitCaps(nn.Module):
         '''Squashes an input Tensor so it has a magnitude between 0-1.
            param input_tensor: a stack of capsule inputs, s_j
            return: a stack of normalized, capsule output vectors, v_j
-           '''
+        '''
         # same squash function as before
         squared_norm = (input_tensor ** 2).sum(dim=-1, keepdim=True)
         scale = squared_norm / (1 + squared_norm) # normalization coeff
@@ -325,6 +376,7 @@ def dynamic_routing(b_ij, u_hat, squash, routing_iterations=3):
     return v_j
 
 def display_images(images, reconstructions):
+    # Function to display images from the reconstructions of the network
     image_size = images.shape[2]
     images = images.data.cpu().numpy()
     reconstructions = reconstructions.view(-1, 1, image_size, image_size)
