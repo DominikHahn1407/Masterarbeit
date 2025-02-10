@@ -64,7 +64,7 @@ class CapsuleNetwork(nn.Module):
         self.train_losses = []  # Liste für die Trainingsverluste pro Epoche
         self.val_losses = []  # Liste für die Validierungsverluste pro Epoche
         min_val_loss = None  # Variable für den minimalen Validierungsverlust, um die besten Gewichte zu speichern
-        weight_file_name = "CAPS_CROPPED/weights/caps_crop.pt"  # Der Pfad, unter dem die Modellgewichte gespeichert werden
+        weight_file_name = "CAPS_CROPPED/weights/caps_crop_new.pt"  # Der Pfad, unter dem die Modellgewichte gespeichert werden
 
         # Training über n_epochs Epochen
         for epoch in range(1, n_epochs + 1):
