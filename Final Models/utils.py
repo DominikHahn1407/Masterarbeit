@@ -297,6 +297,17 @@ class DicomCoarseDataset3D(Dataset):
 
 class DicomFineDataset3D(Dataset):
     def __init__(self, root_dir, classes, transform=None, num_slices=16, final_evaluation=False):
+        '''
+        Initializes the dataset for the Fine Level for the 3D classifier by selecting a specified 
+        number of DICOM images per class and storing their file paths along with corresponding labels.
+
+        Args:
+            root_dir (str): The directory containing class subfolders with DICOM images.
+            classes (list): List of class names (subfolder names).
+            transform (torchvision.transforms): A function for data transformations.
+            num_slices (int): Number of slices as depth for the 3D CT volume.
+            final_evaluation (bool): Boolean, if the daaset is used for the final evaluation of the model.
+        '''
         random.seed(41)
         self.root_dir = root_dir
         self.classes = classes
@@ -307,7 +318,7 @@ class DicomFineDataset3D(Dataset):
         self.final_evaluation = final_evaluation
         self.image_paths = []
         self.labels_fine = []
-
+        # Create a list with all image paths of the dicom files and a list with labels based on the prefix of the filename
         file_groups = {}
         for file_name in os.listdir(root_dir):
             if file_name.endswith(".dcm"):
@@ -316,23 +327,28 @@ class DicomFineDataset3D(Dataset):
                     if prefix not in file_groups:
                         file_groups[prefix] = []
                     file_groups[prefix].append(os.path.join(root_dir, file_name))
-
+        # Group file paths into lists based on num_slices
         for prefix, files in file_groups.items():
             random.shuffle(files)
             for i in range(0, len(files), self.num_slices):
                 volume_files = files[i: i + self.num_slices]
                 if len(volume_files) == self.num_slices: #Only include complete volumes
+                    # create a list with a list for all the dicom image paths in the 3D volume and for all the corresponding labels
                     self.image_volumes.append(volume_files)
                     self.labels.append(self.classes.index(prefix))
                     if self.final_evaluation:
+                        # if the final evaluation is chosen, also a list with all file indices of the dicom files in the folder and 
+                        # the corresponding fine label is created
                         self.image_paths.append([get_file_index(root_dir, slice_path.split("\\")[-1]) for slice_path in volume_files])
                         self.labels_fine.append([self.classes.index(prefix) for i in range(len(volume_files))])
 
     def __len__(self):
-        # length of outer list (amount of volumes)
+        # overwrite the length of the dataset with the amount of available image volumes
         return len(self.image_volumes)
     
     def __getitem__(self, index, resize=(224,224)):
+        # if an instance of the dataset is retrieved, each slice of the 3D volume is converted to a pillow image
+        # and returned with its corrsponding label
         volume_paths = self.image_volumes[index]
         volume_slices = []
 
@@ -342,20 +358,23 @@ class DicomFineDataset3D(Dataset):
             image = Image.fromarray(np.uint8(image))
             image = image.resize(resize)
             volume_slices.append(image)
-
+        # stack the 2D slices to a 3D volume
         volume = np.stack([np.array(slice_img) for slice_img in volume_slices], axis=0)
         if self.transform:
             volume = self.transform(volume)
         label = self.labels[index]
+        # if the final evaluation is chosen, the original and the fine labels are returned as well
         if self.final_evaluation:
             return volume, label, self.image_paths[index], self.labels_fine[index]
         else:
             return volume, label
     
     def get_labels(self):
+        # function to return all the labels of the dataset
         return self.labels
     
     def display_label_distribution(self):
+        # function to visualize the label distribution in the dataset as a barchart
         label_counts = Counter(self.labels)
         labels, counts = zip(*label_counts.items())
         plt.bar(labels, counts)
@@ -366,6 +385,7 @@ class DicomFineDataset3D(Dataset):
         plt.show()
 
     def visualize_volumes(self, num_volumes=3):
+        # function to visualize a specified amount of slices of the 3D volumes with their corresponding labels
         num_volumes = min(num_volumes, len(self.image_volumes))
         _, axes = plt.subplots(1, num_volumes, figsize=(15, 15))
         if num_volumes == 1:
@@ -385,28 +405,50 @@ class DicomFineDataset3D(Dataset):
 
 class TransformDataset(torch.utils.data.Dataset):
     def __init__(self, base_dataset, transform=None):
+        """
+        Wrapper to apply the transformations to the dataset.
+
+        Args:
+            base_dataset (torch.utils.data.Dataset): The original dataset to wrap.
+            transform (torchvision.transforms): A function for data transformations.
+        """
         self.base_dataset = base_dataset
         self.transform = transform
 
     def __getitem__(self, index):
+        # if an instance of the dataset is retrieved, the transforms will be applied to the image
+        # and it will be returned together with its corresponding label
         sample, label = self.base_dataset[index]
         if self.transform:
             sample = self.transform(sample)
         return sample, label
 
     def __len__(self):
+         # overwrite the length of the dataset with the length of the original unwrapped dataset
         return len(self.base_dataset)
     
 class TransformDatasetBalanced(torch.utils.data.Dataset):
     def __init__(self, base_dataset, classes, transform=None, balance=True):
+        """
+        Wrapper to apply the transformations to the dataset and balance it.
+
+        Args:
+            base_dataset (torch.utils.data.Dataset): The original dataset to wrap.
+            classes (dict): Dictionary with class names as keys and index as values.
+            transform (torchvision.transforms): A function for data transformations.
+            balance (bool): Boolean, if the dataset should be balanced.
+        """
         self.base_dataset = base_dataset
         self.classes = classes
         self.transform = transform
         self.samples, self.labels = self.extract_data(base_dataset)
+        # if balancing is chosen, the samples and labels are rebalanced
         if balance:
             self.samples, self.labels = self.balance_dataset(self.samples, self.labels)
 
     def __getitem__(self, index):
+        # if an instance of the dataset is retrieved, the transforms will be applied to the image
+        # and it will be returned together with its corresponding label
         sample = self.samples[index]
         label = self.labels[index]
         if self.transform:
@@ -414,9 +456,11 @@ class TransformDatasetBalanced(torch.utils.data.Dataset):
         return sample, label
     
     def __len__(self):
+        # overwrite the lenght function with the amount of samples
         return len(self.samples)
 
     def extract_data(self, dataset):
+        # function to retrieve samples with their corresponding labels from a dataset and return them as a list
         samples, labels = [], []
         for i in range(len(dataset)):
             sample, label = dataset[i]
@@ -425,12 +469,14 @@ class TransformDatasetBalanced(torch.utils.data.Dataset):
         return samples, labels
 
     def balance_dataset(self, samples, labels):
+        # function to rebalance the dataset by upsampling the minority classes
         label_counts = Counter(labels)
         max_count = max(label_counts.values())
         new_samples = []
         new_labels = []
         for label, count in label_counts.items():
             indices = [i for i, l in enumerate(labels) if l == label]
+            # randomly upsample the dataset by reselecting the indices of the samples
             additional_indices = np.random.choice(indices, max_count - count, replace=True)
             new_samples.extend([samples[i] for i in indices])
             new_samples.extend([samples[i] for i in additional_indices])
@@ -439,6 +485,7 @@ class TransformDatasetBalanced(torch.utils.data.Dataset):
         return new_samples, new_labels
 
     def display_label_distribution(self):
+        # function to visualize the label distribution in the dataset as a barchart
         label_counts = Counter(self.labels)
         labels, counts = zip(*label_counts.items())
         plt.bar(labels, counts)
@@ -449,6 +496,7 @@ class TransformDatasetBalanced(torch.utils.data.Dataset):
         plt.show()
 
     def visualize_images(self, num_images=5):
+        # function to visualize a specified amount of slices of the 3D volumes with their corresponding labels
         num_images = min(num_images, len(self.samples))
         _, axes = plt.subplots(1, num_images, figsize=(15, 15))
         if num_images == 1:
