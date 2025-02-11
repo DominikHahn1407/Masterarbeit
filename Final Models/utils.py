@@ -405,13 +405,13 @@ class DicomFineDataset3D(Dataset):
 
 class TransformDataset(torch.utils.data.Dataset):
     def __init__(self, base_dataset, transform=None):
-        """
+        '''
         Wrapper to apply the transformations to the dataset.
 
         Args:
             base_dataset (torch.utils.data.Dataset): The original dataset to wrap.
             transform (torchvision.transforms): A function for data transformations.
-        """
+        '''
         self.base_dataset = base_dataset
         self.transform = transform
 
@@ -424,12 +424,12 @@ class TransformDataset(torch.utils.data.Dataset):
         return sample, label
 
     def __len__(self):
-         # overwrite the length of the dataset with the length of the original unwrapped dataset
+        # overwrite the length of the dataset with the length of the original unwrapped dataset
         return len(self.base_dataset)
     
 class TransformDatasetBalanced(torch.utils.data.Dataset):
     def __init__(self, base_dataset, classes, transform=None, balance=True):
-        """
+        '''
         Wrapper to apply the transformations to the dataset and balance it.
 
         Args:
@@ -437,7 +437,7 @@ class TransformDatasetBalanced(torch.utils.data.Dataset):
             classes (dict): Dictionary with class names as keys and index as values.
             transform (torchvision.transforms): A function for data transformations.
             balance (bool): Boolean, if the dataset should be balanced.
-        """
+        '''
         self.base_dataset = base_dataset
         self.classes = classes
         self.transform = transform
@@ -513,12 +513,21 @@ class TransformDatasetBalanced(torch.utils.data.Dataset):
         plt.show()
 
 def display_data_loader_batch(data_loader, classes):
+    '''
+    Displays a batch of images from a DataLoader with their corresponding labels.
+
+    Args:
+        data_loader (DataLoader): The PyTorch DataLoader to retrieve images and labels from.
+        classes (list): A list of class names corresponding to the dataset labels.
+    '''
+    # retrieve a batch of the data loader and calculate the number of images to display (minimum of batch size or 8)
     data_iter = iter(data_loader)
     images, labels = next(data_iter)
     num_images = min(len(images), 8)
     _, axes = plt.subplots(1, num_images, figsize=(15,15))
     if num_images == 1:
         axes = [axes]
+    # create the plot for the images with their labels
     for i in range(num_images):
         image = images[i].cpu()
         if image.dim() == 2:
@@ -537,6 +546,14 @@ def display_data_loader_batch(data_loader, classes):
     plt.show()
 
 def display_data_loader_batch_3d(data_loader, classes):
+    '''
+    Displays a batch of images from a DataLoader with 3D volumes with their corresponding labels.
+
+    Args:
+        data_loader (DataLoader): The PyTorch DataLoader to retrieve images and labels from.
+        classes (list): A list of class names corresponding to the dataset labels.
+    '''
+    # retrieve a batch of the data loader and calculate the number of images to display (minimum of batch size or 8)
     data_iter = iter(data_loader)
     images, labels = next(data_iter)
     # Number of images to display
@@ -550,16 +567,16 @@ def display_data_loader_batch_3d(data_loader, classes):
         image = images[i].cpu().numpy()
         
         # Handle 3D images by selecting the middle slice along the depth axis
-        if image.ndim == 4:  # Shape: (C, D, H, W)
-            middle_slice = image[:, image.shape[1] // 2, :, :]  # Select middle slice along depth
-        elif image.ndim == 3:  # Shape: (D, H, W)
-            middle_slice = image[image.shape[0] // 2, :, :]  # Middle slice for grayscale
+        if image.ndim == 4: 
+            middle_slice = image[:, image.shape[1] // 2, :, :] 
+        elif image.ndim == 3:  
+            middle_slice = image[image.shape[0] // 2, :, :]  
         
         # For 2D representation, ensure channels are handled
-        if middle_slice.ndim == 3 and middle_slice.shape[0] in [1, 3]:  # Shape: (C, H, W)
-            middle_slice = middle_slice.transpose(1, 2, 0)  # Convert to (H, W, C)
-        elif middle_slice.ndim == 2:  # Shape: (H, W)
-            middle_slice = middle_slice  # Grayscale images remain as-is
+        if middle_slice.ndim == 3 and middle_slice.shape[0] in [1, 3]:
+            middle_slice = middle_slice.transpose(1, 2, 0)  
+        elif middle_slice.ndim == 2: 
+            middle_slice = middle_slice  
 
         # Normalize to [0, 1] for visualization
         middle_slice = (middle_slice - middle_slice.min()) / (middle_slice.max() - middle_slice.min())
@@ -573,30 +590,28 @@ def display_data_loader_batch_3d(data_loader, classes):
     plt.show()
 
 def hash_image(image):
-    """
+    '''
     Hashes an image using SHA256 for comparison.
+
     Args:
         image (numpy.ndarray): The image to hash.
-    Returns:
-        str: The hash of the image.
-    """
+    '''
     image_bytes = image.tobytes()  # Convert image to bytes
     return hashlib.sha256(image_bytes).hexdigest()
 
 def find_overlapping_images(train_dataset, test_dataset, logging=True):
-    """
+    '''
     Checks if images in the training dataset overlap with the test dataset.
     Args:
-        train_dataset: The training dataset.
-        test_dataset: The test dataset.
-    Returns:
-        list: List of overlapping indices (train_idx, test_idx).
-    """
+        train_dataset (dataset): The training dataset.
+        test_dataset (dataset): The test dataset.
+        logging (bool): Boolean, whether the results should be logged.
+    '''
     # Extract and hash all train images
     train_hashes = {}
     test_indices = []
     for idx, (image, _) in enumerate(train_dataset):
-        # Convert to numpy if it's a tensor
+        # Convert to numpy if it is a tensor
         if isinstance(image, torch.Tensor):
             image = image.numpy()
         train_hashes[hash_image(image)] = idx
@@ -604,7 +619,7 @@ def find_overlapping_images(train_dataset, test_dataset, logging=True):
     # Check test images against train hashes
     overlaps = []
     for test_idx, (image, _) in enumerate(test_dataset):
-        # Convert to numpy if it's a tensor
+        # Convert to numpy if it is a tensor
         if isinstance(image, torch.Tensor):
             image = image.numpy()
         test_hash = hash_image(image)
@@ -619,19 +634,34 @@ def find_overlapping_images(train_dataset, test_dataset, logging=True):
     return test_indices
 
 def hash_image_3d(image):
+    '''
+    Hashes an 3D volume using SHA256 for comparison.
+
+    Args:
+        image (numpy.ndarray): The 3D volume to hash.
+    '''
     if image.ndim == 3:
         image = image.transpose(1,2,0)
     image_bytes = image.tobytes()
     return hashlib.sha256(image_bytes).hexdigest()
 
 def find_overlapping_images_3d(train_dataset, test_dataset, logging=True):
+    '''
+    Checks if images in the training dataset overlap with the test dataset.
+    Args:
+        train_dataset (dataset): The training dataset.
+        test_dataset (dataset): The test dataset.
+        logging (bool): Boolean, whether the results should be logged.
+    '''
     train_hashes = {}
     test_indices = []
+    # Extract and hash all train images
     for idx, (image, _) in enumerate(train_dataset):
         if isinstance(image, torch.Tensor):
             image = image.numpy()
         train_hashes[hash_image(image)] = idx
     overlaps = []
+    # Check test images against train hashes
     for test_idx, (image, _) in enumerate(test_dataset):
         if isinstance(image, torch.Tensor):
             image = image.numpy()
@@ -647,53 +677,86 @@ def find_overlapping_images_3d(train_dataset, test_dataset, logging=True):
     return test_indices 
 
 def remove_overlapping_images(dataset, overlapping_indices):
+    '''
+    Removes overlapping images from a dataset by excluding specific indices.
+
+    Args:
+        dataset (Dataset): The original PyTorch dataset.
+        overlapping_indices (list): A list of indices that should be removed.
+    '''
     indices_to_remove = set(overlapping_indices)
     remaining_indices = [i for i in range(len(dataset)) if i not in indices_to_remove]
     return torch.utils.data.Subset(dataset, remaining_indices)
 
 class TensorFolderDataset(Dataset):
     def __init__(self, folder_path):
+        '''
+        Loads all pt files from a folder as a dataset.
+
+        Args:
+            folder_path (str): The path to the folder containing `.pt` tensor files.
+        '''
         self.folder_path = folder_path
         self.file_list = [f for f in os.listdir(folder_path) if f.endswith('.pt')]
 
     def __len__(self):
+        # overwrite the lenght function with the amount of pt files in the list
         return len(self.file_list)
     
     def __getitem__(self, idx):
+        # for each index return the image with the corresponding label from the loaded pt file
         file_path = os.path.join(self.folder_path, self.file_list[idx])
         data = torch.load(file_path)
         return data['image'], data['label']   
    
 class DICOMFlatDataset(Dataset):
     def __init__(self, root_dir, classes, transform=None, scenario=1, balance_n=True):
+        '''
+        Initializes the dataset for the Flat classification by selecting a specified number of DICOM images per class 
+        and storing their file paths along with corresponding labels.
+
+        Args:
+            root_dir (str): The directory containing class subfolders with DICOM images.
+            classes (list): List of class names (subfolder names).
+            transform (torchvision.transforms): A function for data transformations.
+            scenario (int): Defines the selection process for non-nodule images.
+            balance_n (bool): Boolean, if the minority classes should be upsampled.
+        '''
         random.seed(41)
         self.root_dir = root_dir
         self.classes = classes
         self.transform = transform
         self.image_paths = []
         self.labels = []
-
+        # iterate through each subfolder in the location (corresponding to the 5 classes of the flat classification problem)
         for folder in os.listdir(root_dir):
             for file_name in os.listdir(os.path.join(root_dir, folder)):
                 if file_name.endswith(".dcm"):
                     prefix = file_name[0]
                     if folder == "non-nodule":
+                        # if scenario 2 is selected only include non nodule images from the LIDC-IDRI dataset
                         if scenario == 2 and prefix != "N":
                             continue
+                        # if scenario 3 is selected only include non nodule images from the Lung-PET-CT-Dx dataset
                         if scenario == 3 and prefix == "N":
                             continue
                         prefix = "N"
                     if prefix in self.classes:
                         file_name = os.path.join(root_dir, folder, file_name)
+                        # create a list for all the dicom image paths and for all the corresponding labels
                         self.image_paths.append(file_name)
                         self.labels.append(self.classes[prefix])
+        # execute the re-balancing
         if balance_n:
             self._balance_class_n()
 
     def __len__(self):
+        # overwrite the length of the dataset with the amount of available image paths
         return len(self.image_paths)
     
     def __getitem__(self, index):
+        # if an instance of the dataset is retrieved, the dicom image is converted to a pillow image
+        # and returned with its corrsponding label
         img_path = self.image_paths[index]
         dicom_image = pydicom.dcmread(img_path)
         image = dicom_image.pixel_array
@@ -704,6 +767,7 @@ class DICOMFlatDataset(Dataset):
         return image, label
     
     def _balance_class_n(self):
+        # function for upsampling the minority classes
         label_counts = Counter(self.labels)
         counts = sorted(label_counts.values(), reverse=True)
         max_amount = counts[1]
@@ -717,9 +781,11 @@ class DICOMFlatDataset(Dataset):
         self.labels = [self.labels[i] for i in balanced_indices]
 
     def get_labels(self):
+        # function to return all the labels of the dataset
         return self.labels
     
     def display_label_distribution(self):
+        # function to visualize the label distribution in the dataset as a barchart
         label_counts = Counter(self.labels)
         labels, counts = zip(*label_counts.items())
         plt.bar(labels, counts)
@@ -730,6 +796,7 @@ class DICOMFlatDataset(Dataset):
         plt.show()
 
     def visualize_images(self, num_images=5):
+        # function to visualize a specified amount of images with their corresponding labels
         num_images = min(num_images, len(self.image_paths))
         _, axes = plt.subplots(1, num_images, figsize=(15, 15))
         if num_images == 1:
@@ -746,14 +813,23 @@ class DICOMFlatDataset(Dataset):
 
 class TensorFolderDatasetFinal(Dataset):
     def __init__(self, folder_path, depth=16):
+        '''
+        Creates a dataset from all pt files within a specified folder.
+
+        Args:
+            folder_path (str): Path to the folder containing pt files.
+            depth (int): Depth for slice_paths and labels_fine when not available.
+        '''
         self.folder_path = folder_path
         self.file_list = [f for f in os.listdir(folder_path) if f.endswith('.pt')]
         self.depth = depth
 
     def __len__(self):
+         # overwrite the length of the dataset with the amount of files
         return len(self.file_list)
     
     def __getitem__(self, idx):
+        # for each index return the 3D volume with the corresponding coarse label and the paths to the original 2D slices with the fine labels
         slice_paths, labels_fine = None, None
         file_path = os.path.join(self.folder_path, self.file_list[idx])
         data = torch.load(file_path)
@@ -767,16 +843,26 @@ class TensorFolderDatasetFinal(Dataset):
     
 class TransformDatasetFinal(torch.utils.data.Dataset):
     def __init__(self, base_dataset, transform=None):
+        '''
+        Wrapper to apply the transformations to the dataset.
+
+        Args:
+            base_dataset (torch.utils.data.Dataset): The original dataset to wrap.
+            transform (torchvision.transforms): A function for data transformations.
+        '''
         self.base_dataset = base_dataset
         self.transform = transform
 
     def __getitem__(self, index):
+        # if an instance of the dataset is retrieved, the transforms will be applied to the image
+        # and it will be returned together with its corresponding label
         sample, label, slice_paths, labels_fine = self.base_dataset[index]
         if self.transform:
             sample = self.transform(sample)
         return sample, label, slice_paths, labels_fine
 
     def __len__(self):
+        # overwrite the length of the dataset with the length of the original unwrapped dataset
         return len(self.base_dataset)
     
 class TensorFolderDatasetFinalFlat(Dataset):
