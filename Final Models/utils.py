@@ -16,7 +16,7 @@ import torch.utils.data
 class DICOMCoarseDataset(Dataset):
     def __init__(self, root_dir, num_images_per_class, classes, transform=None, scenario=1):
         '''
-        Initializes the dataset by selecting a specified number of DICOM images per class 
+        Initializes the dataset for the Coarse Level by selecting a specified number of DICOM images per class 
         and storing their file paths along with corresponding labels.
 
         Args:
@@ -112,13 +112,22 @@ class DICOMCoarseDataset(Dataset):
 
 class DICOMFineDataset(Dataset):
     def __init__(self, root_dir, classes, transform=None):
+        '''
+        Initializes the dataset for the Fine Level by selecting a specified number of DICOM images per class 
+        and storing their file paths along with corresponding labels.
+
+        Args:
+            root_dir (str): The directory containing class subfolders with DICOM images.
+            classes (dictionary): Dictionary of classes with index as key and class name as value.
+            transform (torchvision.transforms): A function for data transformations.
+        '''
         random.seed(41)
         self.root_dir = root_dir
         self.classes = classes
         self.transform = transform
         self.image_paths = []
         self.labels = []
-
+        # Create a list with all image paths of the dicom files and a list with labels based on the prefix of the filename
         for file_name in os.listdir(root_dir):
             if file_name.endswith(".dcm"):
                 prefix = file_name[0]
@@ -127,9 +136,12 @@ class DICOMFineDataset(Dataset):
                     self.labels.append(self.classes[prefix])
 
     def __len__(self):
+        # overwrite the length of the dataset with the amount of available image paths
         return len(self.image_paths)
     
     def __getitem__(self, index):
+        # if an instance of the dataset is retrieved, the dicom image is converted to a pillow image
+        # and returned with its corrsponding label
         img_path = self.image_paths[index]
         dicom_image = pydicom.dcmread(img_path)
         image = dicom_image.pixel_array
@@ -140,9 +152,11 @@ class DICOMFineDataset(Dataset):
         return image, label
     
     def get_labels(self):
+        # function to return all the labels of the dataset
         return self.labels
     
     def display_label_distribution(self):
+        # function to visualize the label distribution in the dataset as a barchart
         label_counts = Counter(self.labels)
         labels, counts = zip(*label_counts.items())
         plt.bar(labels, counts)
@@ -153,6 +167,7 @@ class DICOMFineDataset(Dataset):
         plt.show()
 
     def visualize_images(self, num_images=5):
+        # function to visualize a specified amount of images with their corresponding labels
         num_images = min(num_images, len(self.image_paths))
         _, axes = plt.subplots(1, num_images, figsize=(15, 15))
         if num_images == 1:
@@ -170,6 +185,18 @@ class DICOMFineDataset(Dataset):
 
 class DicomCoarseDataset3D(Dataset):
     def __init__(self, root_dir, num_images_per_class, classes, transform=None, scenario=1, num_slices=16):
+        '''
+        Initializes the dataset for the Coarse Level for the 3D classifier by selecting a specified 
+        number of DICOM images per class and storing their file paths along with corresponding labels.
+
+        Args:
+            root_dir (str): The directory containing class subfolders with DICOM images.
+            num_images_per_class (int): Number of images to select per class.
+            classes (list): List of class names (subfolder names).
+            transform (torchvision.transforms): A function for data transformations.
+            scenario (int): Defines the selection process for non-nodule images.
+            num_slices (int): Number of slices as depth for the 3D CT volume.
+        '''
         random.seed(41)
         self.root_dir = root_dir
         self.num_images_per_class = num_images_per_class
@@ -178,11 +205,11 @@ class DicomCoarseDataset3D(Dataset):
         self.num_slices = num_slices
         self.image_volumes = []
         self.labels = []
-
+        # If scenario 2 is selected only the non nodule images of the LIDC-IDRI dataset are included
         if scenario == 2:
             temp_folder = os.path.join(root_dir, "non-nodule")
             self.num_images_per_class = len([f for f in os.listdir(temp_folder) if f.endswith('.dcm') and f.startswith('N')])
-
+        # For each class iterate through the specific subfolder in the folder location
         for class_label, class_name in enumerate(self.classes):
             class_folder = os.path.join(root_dir, class_name)
             if os.path.isdir(class_folder):
@@ -190,30 +217,34 @@ class DicomCoarseDataset3D(Dataset):
 
                 # Scenario handling for non-nodule files
                 if class_name == "non-nodule":
+                    # if scenario 2 is selected only include non nodule images from the LIDC-IDRI dataset
                     if scenario == 2:
                         dicom_files = [f for f in dicom_files if f.startswith('N')]
+                    # if scenario 3 is selected only include non nodule images from the Lung-PET-CT-Dx dataset
                     elif scenario == 3:
                         dicom_files = [f for f in dicom_files if not f.startswith('N')]
-
+                # if the number of images per class is set, then randomly subsample as many images as specified
                 if len(dicom_files) >= self.num_images_per_class:
                     selected_files = random.sample(dicom_files, self.num_images_per_class)
                 else:
                     selected_files = dicom_files
                     
-                # Group files into 3D volumes based on num_slices
+                # Group file paths into lists based on num_slices
                 for i in range(0, len(selected_files), self.num_slices):
                     volume_files = selected_files[i:i + self.num_slices]
                     if len(volume_files) == self.num_slices:
                         volume_paths = [os.path.join(class_folder, f) for f in volume_files]
-                        # Is a list of lists with 10 paths
+                        # create a list with a list for all the dicom image paths in the 3D volume and for all the corresponding labels
                         self.image_volumes.append(volume_paths)
                         self.labels.append(class_label)
 
     def __len__(self):
-        # lenght of outer list (amount of volumes)
+        # overwrite the length of the dataset with the amount of available image volumes
         return len(self.image_volumes)
     
     def __getitem__(self, index, resize=(224,224)):
+        # if an instance of the dataset is retrieved, each slice of the 3D volume is converted to a pillow image
+        # and returned with its corrsponding label
         volume_paths = self.image_volumes[index]
         volume_slices = []
 
@@ -223,7 +254,7 @@ class DicomCoarseDataset3D(Dataset):
             image = Image.fromarray(np.uint8(image))
             image = image.resize(resize)
             volume_slices.append(image)
-
+        # stack the 2D slices to a 3D volume
         volume = np.stack([np.array(slice_img) for slice_img in volume_slices], axis=0)
         if self.transform:
             volume = self.transform(volume)
@@ -231,9 +262,11 @@ class DicomCoarseDataset3D(Dataset):
         return volume, label
     
     def get_labels(self):
+        # function to return all the labels of the dataset
         return self.labels
     
     def display_label_distribution(self):
+        # function to visualize the label distribution in the dataset as a barchart
         label_counts = Counter(self.labels)
         labels, counts = zip(*label_counts.items())
         plt.bar(labels, counts)
@@ -244,6 +277,7 @@ class DicomCoarseDataset3D(Dataset):
         plt.show()
 
     def visualize_volumes(self, num_volumes=3):
+        # function to visualize a specified amount of slices of the 3D volumes with their corresponding labels
         num_volumes = min(num_volumes, len(self.image_volumes))
         _, axes = plt.subplots(1, num_volumes, figsize=(15, 15))
         if num_volumes == 1:
