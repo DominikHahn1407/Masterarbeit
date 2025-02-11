@@ -867,10 +867,18 @@ class TransformDatasetFinal(torch.utils.data.Dataset):
     
 class TensorFolderDatasetFinalFlat(Dataset):
     def __init__(self, tensor_folder_path, dicom_folder_path):
+        '''
+        Loads all pt files from a folder as a dataset for the final evaluation.
+
+        Args:
+            tensor_folder_path (str): The path to the folder containing `.pt` tensor files.
+            dicom_folder_path (str): The path to the dicom files.
+        '''
         self.tensor_folder_path = tensor_folder_path
         self.dicom_folder_path = dicom_folder_path
         self.indices = []
         self.labels = []
+        # iterate through the pt files in the folder and store all paths to the slices as well as the fine labels in a list
         for pt_file in os.listdir(tensor_folder_path):
             temp_pt_file = torch.load(os.path.join(tensor_folder_path, pt_file))
             for index, value in zip(temp_pt_file['slice_paths'], temp_pt_file['label_fine']):
@@ -879,9 +887,12 @@ class TensorFolderDatasetFinalFlat(Dataset):
                 self.labels.append(value)
 
     def __len__(self):
+        # overwrite the lenght function with the amount of slice paths
         return len(self.indices)
     
     def __getitem__(self, idx):
+        # if an instance of the dataset is retrieved, the dicom image is converted to a pillow image
+        # and returned with its corrsponding label
         key = self.indices[idx]
         dicom_image = pydicom.dcmread(os.path.join(self.dicom_folder_path, key))
         image = dicom_image.pixel_array
@@ -890,19 +901,36 @@ class TensorFolderDatasetFinalFlat(Dataset):
     
 class TransformDatasetFinalFlat(torch.utils.data.Dataset):
     def __init__(self, base_dataset, transform=None):
+        '''
+        Wrapper to apply the transformations to the dataset.
+
+        Args:
+            base_dataset (torch.utils.data.Dataset): The original dataset to wrap.
+            transform (torchvision.transforms): A function for data transformations.
+        '''
         self.base_dataset = base_dataset
         self.transform = transform
 
     def __getitem__(self, index):
+        # if an instance of the dataset is retrieved, the transforms will be applied to the image
+        # and it will be returned together with its corresponding label
         sample, label_fine = self.base_dataset[index]
         if self.transform:
             sample = self.transform(sample)
         return sample, label_fine
 
     def __len__(self):
+        # overwrite the length of the dataset with the length of the original unwrapped dataset
         return len(self.base_dataset)
     
 def get_file_index(folder_path, target_file):
+    '''
+    Retrieves the index of a target file in a sorted list of files from a given folder.
+
+    Args:
+        folder_path (str): The path to the folder containing the files.
+        target_file (str): The name of the file whose index needs to be found.
+    '''
     try:
         file_list = sorted(os.listdir(folder_path))
         index = file_list.index(target_file)
@@ -911,6 +939,14 @@ def get_file_index(folder_path, target_file):
         return -1
     
 def save_images_2D(file_dir, output_dir):
+    '''
+    Processes and saves 2D image slices from 3D tensor volumes stored in `.pt` files.
+
+    Args:
+        file_dir (str): Directory containing `.pt` files with 3D image volumes.
+        output_dir (str): Directory where the extracted 2D slices will be saved.
+    '''
+    # load the pt files from the folder and retrieve the image and the coarse as well as the fine label
     for i, item in enumerate(os.listdir(file_dir)):
         if item != "2D":
             file_path = os.path.join(file_dir, item)
@@ -922,6 +958,7 @@ def save_images_2D(file_dir, output_dir):
                 volume = volume.squeeze(0)
             if isinstance(volume, torch.Tensor):
                 volume = volume.cpu().numpy()
+            # iterate through the different slices of the 3D volume and safe them as pt file with the coarse and fine label
             for j in range(volume.shape[0]):
                 slice_image = volume[j]
                 slice_data = {
