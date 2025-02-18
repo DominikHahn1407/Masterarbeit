@@ -14,7 +14,7 @@ import torch.utils.data
 
 
 class DICOMCoarseDataset(Dataset):
-    def __init__(self, root_dir, num_images_per_class, classes, transform=None, scenario=1):
+    def __init__(self, root_dir, num_images_per_class, classes, transform=None):
         random.seed(41)
         self.root_dir = root_dir
         self.num_images_per_class = num_images_per_class
@@ -23,29 +23,29 @@ class DICOMCoarseDataset(Dataset):
         self.image_paths = []
         self.labels = []
 
-        # Durchlaufe die Klassen (z. B. 'nodule' und 'non-nodule')
+        # Loop through all classes
         for class_label, class_name in enumerate(self.classes):
             class_folder = os.path.join(root_dir, class_name)
             if os.path.isdir(class_folder):
-                # Finde alle JPEG-Bilder
+                # Find all JPEG files in the class folder
                 jpeg_files = [f for f in os.listdir(class_folder) if f.endswith('.jpeg')]
 
-                # Wähle zufällig aus, wenn mehr Bilder als benötigt vorhanden sind
+                # Select images randomly if more images than needed
                 if len(jpeg_files) > self.num_images_per_class:
                     selected_files = random.sample(jpeg_files, self.num_images_per_class)
-                # Wähle alle Bilder aus, wenn weniger Bilder als benötigt vorhanden sind
                 else:
                     selected_files = jpeg_files
 
-                # Speichere die Pfade und zugehörigen Labels
+                # Save paths and corresponding labels
                 for file_name in selected_files:
                     self.image_paths.append(os.path.join(class_folder, file_name))
                     self.labels.append(class_label)
         
-
+    # Return number of images
     def __len__(self):
-        return len(self.image_paths)
+        return len(self.image_paths) 
     
+    # Return image and label
     def __getitem__(self, index):
         img_path = self.image_paths[index]
         image = Image.open(img_path)
@@ -59,6 +59,7 @@ class DICOMCoarseDataset(Dataset):
     def get_labels(self):
         return self.labels
     
+    #Plot label distribution
     def display_label_distribution(self):
         label_counts = Counter(self.labels)
         labels, counts = zip(*label_counts.items())
@@ -69,6 +70,7 @@ class DICOMCoarseDataset(Dataset):
         plt.xticks(labels, [self.classes[label] for label in labels])
         plt.show()
     
+    #Visualize images
     def visualize_images(self, num_images=5):
         num_images = min(num_images, len(self.image_paths))
         _, axes = plt.subplots(1, num_images, figsize=(15,15))
@@ -86,19 +88,23 @@ class DICOMCoarseDataset(Dataset):
 
 class TransformDataset(torch.utils.data.Dataset):
     def __init__(self, base_dataset, transform=None):
+        #Wraps an existing dataset and applies transformations
         self.base_dataset = base_dataset
         self.transform = transform
 
     def __getitem__(self, index):
+        #Retrieves an item and applies the transformation if provided
         sample, label = self.base_dataset[index]
         if self.transform:
             sample = self.transform(sample)
         return sample, label
 
     def __len__(self):
+        #Returns the size of the dataset
         return len(self.base_dataset)
  
 def display_data_loader_batch(data_loader, classes):
+    #Displays a batch of images from a DataLoader with their labels
     data_iter = iter(data_loader)
     images, labels = next(data_iter)
     num_images = min(len(images), 5)
@@ -123,88 +129,9 @@ def display_data_loader_batch(data_loader, classes):
     plt.show()
 
 
-    def __init__(self, root_dir, classes, transform=None, scenario=1, balance_n=True):
-        random.seed(41)
-        self.root_dir = root_dir
-        self.classes = classes
-        self.transform = transform
-        self.image_paths = []
-        self.labels = []
-
-        for folder in os.listdir(root_dir):
-            for file_name in os.listdir(os.path.join(root_dir, folder)):
-                if file_name.endswith(".dcm"):
-                    prefix = file_name[0]
-                    if folder == "non-nodule":
-                        if scenario == 2 and prefix != "N":
-                            continue
-                        if scenario == 3 and prefix == "N":
-                            continue
-                        prefix = "N"
-                    if prefix in self.classes:
-                        file_name = os.path.join(root_dir, folder, file_name)
-                        self.image_paths.append(file_name)
-                        self.labels.append(self.classes[prefix])
-        if balance_n:
-            self._balance_class_n()
-
-    def __len__(self):
-        return len(self.image_paths)
-    
-    def __getitem__(self, index):
-        img_path = self.image_paths[index]
-        dicom_image = pydicom.dcmread(img_path)
-        image = dicom_image.pixel_array
-        image = Image.fromarray(np.uint8(image))
-        if self.transform:
-            image = self.transform(image)
-        label = self.labels[index]
-        return image, label
-    
-    def _balance_class_n(self):
-        label_counts = Counter(self.labels)
-        counts = sorted(label_counts.values(), reverse=True)
-        max_amount = counts[1]
-        n_indices = [i for i, label in enumerate(self.labels) if label == self.classes["N"]]
-        if len(n_indices) > max_amount:
-            n_indices = random.sample(n_indices, max_amount)
-        balanced_indices = [
-            i for i, label in enumerate(self.labels) if label != self.classes["N"]
-        ] + n_indices
-        self.image_paths = [self.image_paths[i] for i in balanced_indices]
-        self.labels = [self.labels[i] for i in balanced_indices]
-
-    def get_labels(self):
-        return self.labels
-    
-    def display_label_distribution(self):
-        label_counts = Counter(self.labels)
-        labels, counts = zip(*label_counts.items())
-        plt.bar(labels, counts)
-        plt.xlabel("Label")
-        plt.ylabel("Count")
-        plt.title("Label Distribution")
-        plt.xticks(labels, [list(self.classes.keys())[label] for label in labels])
-        plt.show()
-
-    def visualize_images(self, num_images=5):
-        num_images = min(num_images, len(self.image_paths))
-        _, axes = plt.subplots(1, num_images, figsize=(15, 15))
-        if num_images == 1:
-            axes = [axes]
-        for i in range(num_images):
-            random_index = random.randint(0, len(self.image_paths) - 1)
-            image, label = self.__getitem__(random_index)
-            if isinstance(image, torch.Tensor):
-                image = image.squeeze().numpy()
-            axes[i].imshow(image, cmap="gray")
-            axes[i].set_title(f"Label: {list(self.classes.keys())[label]}")
-            axes[i].axis("off")
-        plt.show()
-
 
 class CAPS_Productive_Dataset(Dataset):
-    def __init__(self, root_dir, num_images_per_class, classes, transform=None, scenario=1):
+    def __init__(self, root_dir, num_images_per_class, classes, transform=None):
         random.seed(41)
         self.root_dir = root_dir
         self.num_images_per_class = num_images_per_class
@@ -213,21 +140,21 @@ class CAPS_Productive_Dataset(Dataset):
         self.image_paths = []
         self.labels = []
 
-        # Durchlaufe die Klassen (z. B. 'nodule' und 'non-nodule')
+        # Iterate through classes
         for class_label, class_name in enumerate(self.classes):
             class_folder = os.path.join(root_dir, class_name)
             if os.path.isdir(class_folder):
-                # Finde alle JPEG-Bilder
+                # Get all JPEG images in the class folder
                 jpeg_files = [f for f in os.listdir(class_folder) if f.endswith('.jpeg') or f.endswith('.jpg') or f.endswith('.JPEG')]
 
-                # Wähle zufällig aus, wenn mehr Bilder als benötigt vorhanden sind
+                # Select a subset of images if there are more than needed
                 if len(jpeg_files) > self.num_images_per_class:
                     selected_files = random.sample(jpeg_files, self.num_images_per_class)
-                # Wähle alle Bilder aus, wenn weniger Bilder als benötigt vorhanden sind
+                # Use all images if fewer than required
                 else:
                     selected_files = jpeg_files
 
-                # Speichere die Pfade und zugehörigen Labels
+                # Store file paths and their corresponding labels
                 for file_name in selected_files:
                     self.image_paths.append(os.path.join(class_folder, file_name))
                     self.labels.append(class_label)
