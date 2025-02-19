@@ -254,7 +254,7 @@ class CapsuleNetwork(nn.Module):
                 label = target_shape.data[i]
                 class_correct[label] += correct[i].item()
                 class_total[label] += 1
-                
+
         # Compute average test loss
         avg_test_loss = test_loss / len(test_loader)
         print('Test Loss: {:.8f}\n'.format(avg_test_loss))
@@ -461,8 +461,6 @@ class CapsuleLoss(nn.Module):
         # Compute the left and right part of the margin loss
         left = F.relu(0.9 - v_c).view(batch_size, -1)  # Relu applied to (0.9 - v_c), encourages capsule vectors to be larger than 0.9
         right = F.relu(v_c - 0.1).view(batch_size, -1) # Relu applied to (v_c - 0.1), encourages capsule vectors to be smaller than 0.1 for non-target classes
-        margin_loss = labels * left + 0.5 * \
-            (1. - labels) * right  # some multiplications
         
         # Calculate the margin loss: 
         # - When the label is 1 (positive class), the loss encourages the capsule vector magnitude to be above 0.9
